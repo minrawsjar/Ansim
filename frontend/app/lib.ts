@@ -84,8 +84,20 @@ const within = <T,>(p: Promise<T> | undefined, ms: number) =>
 const NILE_CHAIN_ID = '0xcd8690dc';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// What TronLink shows without asking anything: installed or not, the account if this site is already
+// connected, and whether it is on Nile. Never opens a popup.
+export async function tronLinkState(): Promise<{ installed: boolean; address: string | null; onNile: boolean | null }> {
+  const w = window as any;
+  if (!w.tronLink && !w.tronWeb) return { installed: false, address: null, onNile: null };
+  const tronWeb = w.tronLink?.tronWeb || w.tronWeb;
+  const address: string | null = tronWeb?.defaultAddress?.base58 || null;
+  if (!address) return { installed: true, address: null, onNile: null };
+  const genesis = await within<{ blockID?: string }>(tronWeb.trx.getBlockByNumber(0), 8_000).catch(() => null);
+  return { installed: true, address, onNile: genesis?.blockID ? '0x' + String(genesis.blockID).slice(-8) === NILE_CHAIN_ID : null };
+}
+
 // Connects TronLink and makes sure it is on Nile. Returns its TronWeb and the connected address.
-async function connectTronLink() {
+export async function connectTronLink() {
   const w = window as any;
   if (!w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
   if (w.tronLink?.request) await w.tronLink.request({ method: 'tron_requestAccounts' });

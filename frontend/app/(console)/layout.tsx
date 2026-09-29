@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ConnectWallet } from '../wallet';
 
 const REPO = 'https://github.com/minrawsjar/Ansim';
 
@@ -19,10 +20,9 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             <Link href="/#batches" className="hover:text-celadon">Batches</Link>
             <Link href="/disputes" className="hover:text-celadon">Disputes</Link>
             <Link href="/metrics" className="hover:text-celadon">Tokens &amp; energy</Link>
+            <a href={REPO} target="_blank" rel="noopener" className="hover:text-celadon">Source ↗</a>
           </nav>
-          <a href={REPO} target="_blank" rel="noopener" className="rounded-[7px] border border-line px-3.5 py-2.5 text-xs font-semibold whitespace-nowrap transition hover:bg-raised">
-            Source on GitHub ↗
-          </a>
+          <ConnectWallet />
         </div>
       </header>
       <main className="mx-auto max-w-[1510px] px-4 sm:px-[4.5%]">{children}</main>
