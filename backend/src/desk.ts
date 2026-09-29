@@ -714,12 +714,73 @@ export function paymentHistory() {
     const ack = r.ack ? (JSON.parse(r.ack) as Ack) : null;
     const contact = places.get(r.receiver);
     return {
-      id: r.id, batchId: r.batch_id, name: r.name, receiver: r.receiver, city: contact?.city ?? null, country: contact?.country ?? null,
+      id: r.id, batchId: r.batch_id, line: r.line, sender: r.sender, name: r.name, receiver: r.receiver, city: contact?.city ?? null, country: contact?.country ?? null,
       amount: r.amount, fee: r.fee, state: r.state, reason: r.reason, txnHash: r.txn_hash,
       atMs: (r.state === 'SUCCEED' ? paidAtMs(r.id) : null) ?? r.updated_at_ms ?? r.signed_at_ms,
       receiptToken: receiptToken(r), confirmed: ack ? { at: ack.at, city: ack.city } : null,
     };
   });
+}
+
+export function paymentsCsv() {
+  const site = process.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? '';
+  const head = [
+    'time_utc', 'batch', 'line', 'sender', 'recipient', 'wallet', 'city', 'country', 'amount_usdt', 'fee_usdt', 'status', 'reason',
+    'txn_hash', 'tronscan_url', 'receipt_link', 'family_confirmed_utc', 'family_city',
+  ];
+  const lines = paymentHistory().map((p) =>
+    [
+      iso(p.atMs), p.batchId, p.line, p.sender, p.name, p.receiver, p.city, p.country, p.amount != null ? (p.amount / 1e6).toFixed(6) : '',
+      p.state === 'SUCCEED' && p.fee != null ? (p.fee / 1e6).toFixed(6) : '', p.state, p.reason, p.txnHash,
+      p.txnHash ? `https://nile.tronscan.org/#/transaction/${p.txnHash}` : '', p.receiptToken ? `${site}/r/${p.receiptToken}` : '',
+      iso(p.confirmed ? p.confirmed.at * 1000 : null), p.confirmed?.city ?? '',
+    ].map(csvCell).join(','),
+  );
+  return '\ufeff' + [head.join(','), ...lines].join('\n');
+}
+
+// A receipt for one paid payment, as a self-contained HTML file: it opens anywhere and prints to PDF.
+// Names and notes can come from uploaded files, so every value is escaped.
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const kst = (ms: number) => `${new Date(ms).toLocaleString('en-GB', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' })} KST`;
+export function paymentReceipt(rowId: number) {
+  const r = getRow(rowId) as Row | undefined;
+  if (!r || r.decision !== 'pay' || r.state !== 'SUCCEED' || !r.txn_hash) throw new Error('Only a paid payment has a receipt.');
+  const batch = getBatch(r.batch_id)!;
+  const approval = batch.approval ? (JSON.parse(batch.approval) as Approval) : null;
+  const contact = payeeBook().find((p) => p.address === r.receiver);
+  const ack = r.ack ? (JSON.parse(r.ack) as Ack) : null;
+  const paidAt = paidAtMs(r.id) ?? r.updated_at_ms ?? Date.now();
+  const tx = `https://nile.tronscan.org/#/transaction/${r.txn_hash}`;
+  const fields: [string, string][] = [
+    ['Paid', esc(kst(paidAt))],
+    ['From', esc(r.sender || 'Ansim')],
+    ['To', `${esc(r.name)}${contact?.city || contact?.country ? ` · ${esc([contact?.city, contact?.country].filter(Boolean).join(', '))}` : ''}`],
+    ['Wallet', `<code>${esc(r.receiver)}</code>`],
+    ['Amount received', `<b>${esc(((r.amount ?? 0) / 1e6).toFixed(2))} USDT</b> (the family paid nothing and needed no TRX)`],
+    ['GasFree fee', `${esc(((r.fee ?? 0) / 1e6).toFixed(2))} USDT, paid by the sender`],
+    ...(r.note ? [['Note', esc(r.note)] as [string, string]] : []),
+    ['Transaction', `<a href="${esc(tx)}"><code>${esc(r.txn_hash)}</code></a>`],
+    ['Network', 'TRON Nile testnet · USDT (TRC-20)'],
+    ['Batch', `#${esc(batch.id)}, line ${esc(r.line)}${batch.policy_id ? ` · payment limits #${esc(batch.policy_id)}` : ''}`],
+    ...(approval ? [['Approved by', `<code>${esc(approval.owner)}</code> (the owner's TIP-712 signature)`] as [string, string]] : []),
+    ['Family confirmed', ack ? `${esc(kst(ack.at * 1000))}${ack.city ? ` · ${esc(ack.city)}` : ''}` : 'Not yet'],
+  ];
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ansim receipt · batch ${esc(batch.id)} line ${esc(r.line)}</title>
+<style>
+body{font:15px/1.6 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;color:#17201c;background:#fff;margin:0;padding:32px 16px}
+main{max-width:640px;margin:0 auto}h1{font-size:24px;margin:0 0 4px}p{color:#56645b;margin:0 0 24px}
+dl{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:10px 20px;margin:0;border-top:1px solid #d5ddd4;padding-top:18px}
+dt{color:#56645b}dd{margin:0;overflow-wrap:anywhere}code{font:13px ui-monospace,Menlo,monospace}a{color:#2f6b3a}
+footer{margin-top:28px;padding-top:14px;border-top:1px solid #d5ddd4;font-size:12px;color:#56645b}
+</style></head><body><main>
+<h1>안심 Ansim · Payment receipt</h1>
+<p>A USDT payment sent through GasFree on TRON. Anyone can check it on TronScan with the transaction link below.</p>
+<dl>${fields.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+<footer>Generated ${esc(kst(Date.now()))} from Ansim's hash-chained log. This payment was sent on a test network.</footer>
+</main></body></html>`;
 }
 
 const paidAtMs = (rowId: number) =>

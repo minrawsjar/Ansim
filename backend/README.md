@@ -79,6 +79,8 @@ Everything is under `/api`. With `BACKEND_KEY` set, every request except `/healt
 | POST | `/vault/freeze` | Records the owner's `setFrozen` transaction after checking it |
 | POST | `/vault/return` | Moves idle USDT from the GasFree account into the vault |
 | GET | `/payments/recent` | Recent payments for the map |
+| GET | `/payments` | Every payment sent or refused, across batches; `?format=csv` downloads it |
+| GET | `/payments/:id/receipt` | A paid payment's receipt as an HTML file |
 | POST | `/agent/plan` | Drafts a batch from an instruction |
 | GET | `/metrics` | Tokens, latency and energy by flow |
 | POST | `/telegram/webhook` | Telegram updates (secret header checked) |

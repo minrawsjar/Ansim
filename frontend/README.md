@@ -12,6 +12,7 @@ Live at **https://ansim-ecru.vercel.app**.
 |---|---|---|---|
 | `/` | [`app/(console)/page.tsx`](app/%28console%29/page.tsx) | Operator and owner | Contacts, payment limits, the payout agent, import, the vault, the live payout map, the boundary runs and batches |
 | `/batch/[id]` | [`app/(console)/batch/[id]/page.tsx`](app/%28console%29/batch/[id]/page.tsx) | Operator and owner | A batch's rows and flags, inline fixes, Travel Rule details, the pre-check, the owner's approval, pay and recover, the map, receipts, exports, verify and the auditor AI |
+| `/payments` | [`app/(console)/payments/page.tsx`](app/%28console%29/payments/page.tsx) | Operator and owner | Every payment across batches, newest first, with totals, TronScan links, a CSV export and a receipt download per payment |
 | `/disputes` | [`app/(console)/disputes/page.tsx`](app/%28console%29/disputes/page.tsx) | Support | Finds a payment, shows the chain's own proof, and drafts a reply |
 | `/metrics` | [`app/(console)/metrics/page.tsx`](app/%28console%29/metrics/page.tsx) | Judges and the operator | Tokens, latency and energy by AI flow, with the model and provider |
 | `/r/[token]` | [`app/r/[token]/page.tsx`](app/r/[token]/page.tsx) | The family | Their receipt in Vietnamese, Tagalog or Nepali with English (plus Korean), "I received it", and an optional city |

@@ -11,6 +11,8 @@ type Payment = {
   atMs: number | null; receiptToken: string | null; confirmed: { at: number; city: string | null } | null;
 };
 
+const LINK_BUTTON = 'inline-flex items-center rounded-[7px] border border-line px-3.5 py-2.5 text-xs font-semibold text-[#c8d1c7] transition hover:bg-raised';
+
 // Every payment across all batches, newest first. Paid, in flight, refused and failed, each with its proof on chain.
 export default function PaymentsPage() {
   const [list, setList] = useState<Payment[] | null>(null);
@@ -44,15 +46,20 @@ export default function PaymentsPage() {
             <Stat label="Refused or failed" value={list.filter((p) => p.state === 'REFUSED' || p.state === 'FAILED').length} tone="warn" />
           </div>
 
-          <Card eyebrow="From the hash-chained log" title={`${list.length} ${list.length === 1 ? 'payment' : 'payments'}`} className="overflow-hidden">
+          <Card
+            eyebrow="From the hash-chained log"
+            title={`${list.length} ${list.length === 1 ? 'payment' : 'payments'}`}
+            className="overflow-hidden"
+            action={list.length > 0 && <a href="/api/payments?format=csv" className={LINK_BUTTON}>Export CSV ↓</a>}
+          >
             {list.length === 0 ? (
               <p className="text-xs text-muted">No payments yet. Approve and pay a batch from the payout desk.</p>
             ) : (
               <div className="-mx-5 overflow-x-auto sm:-mx-6">
-                <table className="w-full min-w-[60rem] border-collapse text-left text-[13px] [&_tr>*:first-child]:pl-5 sm:[&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-5">
+                <table className="w-full min-w-[66rem] border-collapse text-left text-[13px] [&_tr>*:first-child]:pl-5 sm:[&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-5">
                   <thead className="border-y border-line font-mono text-[9px] tracking-[0.1em] text-muted uppercase">
                     <tr>
-                      {['When', 'Recipient', 'Wallet', 'USDT', 'Fee', 'Status', 'Transaction', 'Batch', 'Family'].map((h) => (
+                      {['When', 'Recipient', 'Wallet', 'USDT', 'Fee', 'Status', 'Transaction', 'Batch', 'Receipt', 'Family'].map((h) => (
                         <th key={h} className={`px-3 py-2.5 font-normal ${h === 'USDT' || h === 'Fee' ? 'text-right' : ''}`}>{h}</th>
                       ))}
                     </tr>
@@ -74,13 +81,19 @@ export default function PaymentsPage() {
                         </td>
                         <td className="px-3 py-3"><TxLink hash={p.txnHash} /></td>
                         <td className="px-3 py-3"><Link href={`/batch/${p.batchId}`} className="font-mono text-xs text-celadon hover:underline">#{p.batchId}</Link></td>
-                        <td className="px-3 py-3 text-[11px]">
-                          {p.confirmed ? (
-                            <span className="text-celadon">✓ Received{p.confirmed.city ? ` · ${p.confirmed.city}` : ''}</span>
-                          ) : p.state === 'SUCCEED' && p.receiptToken ? (
-                            <a href={`/r/${p.receiptToken}`} target="_blank" rel="noopener" className="text-celadon hover:underline">Receipt ↗</a>
+                        <td className="px-3 py-3 text-[11px] whitespace-nowrap">
+                          {p.state === 'SUCCEED' && p.txnHash ? (
+                            <a href={`/api/payments/${p.id}/receipt`} className="text-celadon hover:underline">Download ↓</a>
                           ) : (
                             <span className="text-muted">–</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-[11px]">
+                          {p.confirmed && <div className="text-celadon">✓ Received{p.confirmed.city ? ` · ${p.confirmed.city}` : ''}</div>}
+                          {p.state === 'SUCCEED' && p.receiptToken ? (
+                            <a href={`/r/${p.receiptToken}`} target="_blank" rel="noopener" className="text-muted hover:text-celadon hover:underline">Family page ↗</a>
+                          ) : (
+                            !p.confirmed && <span className="text-muted">–</span>
                           )}
                         </td>
                       </tr>

@@ -15,7 +15,7 @@ import {
   draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, setContactCity, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
   familyReceipt, confirmReceipt, findPayments, askDispute,
-  vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments, paymentHistory, planBatch,
+  vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments, paymentHistory, paymentsCsv, paymentReceipt, planBatch,
 } from './desk';
 
 const app = new Hono().basePath('/api');
@@ -161,7 +161,19 @@ app.get('/chain/:txid', async (c) => {
 
 app.get('/vault', async (c) => c.json(await vaultView()));
 app.get('/payments/recent', (c) => c.json(recentPayments()));
-app.get('/payments', (c) => c.json(paymentHistory()));
+app.get('/payments', (c) => {
+  if (c.req.query('format') !== 'csv') return c.json(paymentHistory());
+  c.header('Content-Type', 'text/csv; charset=utf-8');
+  c.header('Content-Disposition', 'attachment; filename="ansim-payments.csv"');
+  return c.body(paymentsCsv());
+});
+app.get('/payments/:id/receipt', (c) => {
+  const rowId = id(c.req.param('id'));
+  const html = paymentReceipt(rowId);
+  c.header('Content-Type', 'text/html; charset=utf-8');
+  c.header('Content-Disposition', `attachment; filename="ansim-receipt-${rowId}.html"`);
+  return c.body(html);
+});
 app.post('/agent/plan', async (c) => c.json(await planBatch(String((await c.req.json()).instruction ?? ''))));
 app.post('/vault/freeze', async (c) => {
   const { frozen, txid } = await c.req.json();
