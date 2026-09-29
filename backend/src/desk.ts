@@ -704,6 +704,24 @@ export function recentPayments() {
 
 // The family's receipt page. Public, but only reachable through the row's unguessable token.
 // When a row was paid, from its log: the ROW_STATE that said SUCCEED, or a recovery that found it on chain.
+// Every payment Ansim attempted, across all batches, newest first: paid, in flight, refused and failed.
+// Rows in a draft or held back were never attempted, so they are left out.
+// ponytail: newest 500 only; page through by id if a real operator's history outgrows that.
+export function paymentHistory() {
+  const places = new Map(payeeBook().map((p) => [p.address, p]));
+  const rows = db.prepare("SELECT * FROM rows WHERE decision = 'pay' AND state != 'READY' ORDER BY id DESC LIMIT 500").all() as Row[];
+  return rows.map((r) => {
+    const ack = r.ack ? (JSON.parse(r.ack) as Ack) : null;
+    const contact = places.get(r.receiver);
+    return {
+      id: r.id, batchId: r.batch_id, name: r.name, receiver: r.receiver, city: contact?.city ?? null, country: contact?.country ?? null,
+      amount: r.amount, fee: r.fee, state: r.state, reason: r.reason, txnHash: r.txn_hash,
+      atMs: (r.state === 'SUCCEED' ? paidAtMs(r.id) : null) ?? r.updated_at_ms ?? r.signed_at_ms,
+      receiptToken: receiptToken(r), confirmed: ack ? { at: ack.at, city: ack.city } : null,
+    };
+  });
+}
+
 const paidAtMs = (rowId: number) =>
   (db
     .prepare(`SELECT ts_ms FROM events WHERE row_id = ? AND (type = 'ROW_RECOVERED' OR (type = 'ROW_STATE' AND body LIKE '%"state":"SUCCEED"%')) ORDER BY id DESC LIMIT 1`)
