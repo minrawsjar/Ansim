@@ -3,31 +3,41 @@
 import { useState } from 'react';
 import { FLAGS, tronscanTx } from './lib';
 
-export function Card({ title, action, children, className = '' }: { title?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+export function Card({ eyebrow, title, action, children, className = '', id }: { eyebrow?: string; title?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <section className={`min-w-0 rounded-lg border border-line bg-surface ${className}`}>
+    <section id={id} className={`min-w-0 scroll-mt-6 rounded-xl border border-line bg-surface ${className}`}>
       {title && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
-          <h2 className="text-[15px] font-bold">{title}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 pb-4 sm:px-6">
+          <div className="min-w-0">
+            {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+            <h2 className="mt-1.5 text-lg font-medium tracking-[-0.025em]">{title}</h2>
+          </div>
           {action}
         </div>
       )}
-      <div className="p-4">{children}</div>
+      <div className={`px-5 pb-5 sm:px-6 ${title ? '' : 'pt-5'}`}>{children}</div>
     </section>
   );
 }
 
-export function Button({ kind = 'secondary', busy, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'primary' | 'secondary' | 'danger'; busy?: boolean }) {
+// A quiet note inside a panel, for context that should not compete with the data.
+export function Callout({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
+  const color = tone === 'warn' ? 'border-warn/30 bg-warn/5 text-warn' : 'border-[#354b38] bg-[#202d23] text-[#b6cdae]';
+  return <div className={`rounded-md border px-3.5 py-3 text-xs leading-relaxed ${color}`}>{children}</div>;
+}
+
+export function Button({ kind = 'secondary', busy, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'primary' | 'secondary' | 'quiet' | 'danger'; busy?: boolean }) {
   const styles = {
-    primary: 'bg-celadon text-white hover:brightness-110 border-celadon',
-    secondary: 'bg-surface text-ink hover:border-celadon border-line',
-    danger: 'bg-surface text-stop border-stop/40 hover:bg-stop/5',
+    primary: 'bg-celadon text-on-celadon border-celadon hover:bg-[#d8f6cd] hover:border-[#d8f6cd]',
+    secondary: 'bg-raised text-[#d4e6cd] border-edge hover:bg-[#314a34]',
+    quiet: 'bg-transparent text-[#c8d1c7] border-line hover:bg-raised',
+    danger: 'bg-[#302723] text-[#e4b0a6] border-[#704941] hover:bg-[#47332d]',
   }[kind];
   return (
     <button
       {...props}
       disabled={props.disabled || busy}
-      className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-celadon disabled:cursor-not-allowed disabled:opacity-45 ${styles} ${props.className ?? ''}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-[7px] border px-3.5 py-2.5 text-xs font-semibold transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 ${styles} ${props.className ?? ''}`}
     >
       {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
@@ -44,12 +54,12 @@ const STATE_STYLE: Record<string, string> = {
   STOPPED: 'bg-stop/10 text-stop border-stop/30',
   UNKNOWN: 'bg-warn/10 text-warn border-warn/30',
   PAUSED: 'bg-warn/10 text-warn border-warn/30',
-  RUNNING: 'bg-celadon-soft text-celadon border-celadon/30',
-  WAITING: 'bg-celadon-soft text-celadon border-celadon/30',
-  INPROGRESS: 'bg-celadon-soft text-celadon border-celadon/30',
-  CONFIRMING: 'bg-celadon-soft text-celadon border-celadon/30',
-  SIGNED: 'bg-celadon-soft text-celadon border-celadon/30',
-  SUBMITTED: 'bg-celadon-soft text-celadon border-celadon/30',
+  RUNNING: 'bg-celadon-soft text-celadon border-celadon/35',
+  WAITING: 'bg-celadon-soft text-celadon border-celadon/35',
+  INPROGRESS: 'bg-celadon-soft text-celadon border-celadon/35',
+  CONFIRMING: 'bg-celadon-soft text-celadon border-celadon/35',
+  SIGNED: 'bg-celadon-soft text-celadon border-celadon/35',
+  SUBMITTED: 'bg-celadon-soft text-celadon border-celadon/35',
 };
 const STATE_LABEL: Record<string, string> = {
   READY: 'Ready', SIGNED: 'Signed', SUBMITTED: 'Sent', WAITING: 'Waiting', INPROGRESS: 'Processing', CONFIRMING: 'Confirming',
@@ -59,7 +69,7 @@ const STATE_LABEL: Record<string, string> = {
 
 export function StatePill({ state }: { state: string }) {
   return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-mono text-[11px] font-medium ${STATE_STYLE[state] ?? 'border-line bg-paper text-muted'}`}>
+    <span className={`inline-flex items-center whitespace-nowrap rounded-[4px] border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.08em] uppercase ${STATE_STYLE[state] ?? 'border-line text-muted'}`}>
       {STATE_LABEL[state] ?? state}
     </span>
   );
@@ -68,7 +78,7 @@ export function StatePill({ state }: { state: string }) {
 export function FlagChip({ flag }: { flag: string }) {
   const f = FLAGS[flag] ?? { label: flag, tip: flag };
   return (
-    <span title={f.tip} className={`inline-block whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] font-medium ${f.blocking ? 'border-stop/40 bg-stop/10 text-stop' : 'border-warn/40 bg-warn/10 text-warn'}`}>
+    <span title={f.tip} className={`inline-block whitespace-nowrap rounded-[4px] border px-1.5 py-0.5 text-[11px] font-medium ${f.blocking ? 'border-stop/40 bg-stop/10 text-stop' : 'border-warn/40 bg-warn/10 text-warn'}`}>
       {f.label}
     </span>
   );
@@ -103,7 +113,7 @@ export function Copy({ text }: { text: string }) {
     <button
       type="button"
       onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }).catch(() => {})}
-      className="rounded border border-line px-1.5 text-[11px] text-muted hover:border-celadon hover:text-celadon"
+      className="rounded-[4px] border border-line px-1.5 text-[11px] text-muted hover:border-celadon hover:text-celadon"
     >
       {done ? 'Copied' : 'Copy'}
     </button>
@@ -112,15 +122,15 @@ export function Copy({ text }: { text: string }) {
 
 export function ErrorLine({ error }: { error: string | null }) {
   if (!error) return null;
-  return <p className="rounded-md border border-stop/30 bg-stop/5 px-3 py-2 text-sm text-stop">{error}</p>;
+  return <p className="rounded-md border border-stop/30 bg-stop/10 px-3.5 py-3 text-xs leading-relaxed text-stop">{error}</p>;
 }
 
 export function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'ok' | 'warn' | 'stop' }) {
   const color = tone === 'ok' ? 'text-ok' : tone === 'warn' ? 'text-warn' : tone === 'stop' ? 'text-stop' : 'text-ink';
   return (
-    <div className="min-w-0">
-      <div className="text-[11px] font-medium tracking-wide text-muted uppercase">{label}</div>
-      <div className={`num font-mono text-lg font-medium ${color}`}>{value}</div>
+    <div className="min-w-0 border-l border-line pl-3">
+      <div className="font-mono text-[9px] tracking-[0.1em] text-muted uppercase">{label}</div>
+      <div className={`num mt-1 text-xl font-normal tracking-[-0.02em] ${color}`}>{value}</div>
     </div>
   );
 }

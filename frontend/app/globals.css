@@ -1,19 +1,27 @@
 @import "tailwindcss";
 
-/* Celadon accent on a green-tinted paper, matching the Ansim plan. */
+/* Dark celadon console: green-black ground, pale celadon accent, small mono labels. */
 @theme {
-  --color-paper: #f3f6f5;
-  --color-surface: #ffffff;
-  --color-ink: #14201c;
-  --color-muted: #56675f;
-  --color-line: #d3ded9;
-  --color-celadon: #2b7a6a;
-  --color-celadon-soft: #ddede8;
-  --color-ok: #2b7a4b;
-  --color-warn: #9a6200;
-  --color-stop: #b02a21;
-  --font-sans: var(--font-plex), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --color-paper: #101614;
+  --color-surface: #17201c;
+  --color-sunken: #111a15;
+  --color-raised: #243328;
+  --color-ink: #e8ede6;
+  --color-muted: #97a69b;
+  --color-line: #2d3b33;
+  --color-edge: #4d6550;
+  --color-celadon: #c5edb7;
+  --color-celadon-soft: #253628;
+  --color-on-celadon: #142112;
+  --color-ok: #a9dc98;
+  --color-warn: #e8b485;
+  --color-stop: #e7a39b;
+  --font-sans: var(--font-inter), var(--font-plex), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
 }
 
 body {
@@ -21,6 +29,54 @@ body {
   color: var(--color-ink);
 }
 
+@layer base {
+  input:not([type="checkbox"]):not([type="file"]),
+  select,
+  textarea {
+    background: var(--color-sunken);
+    border: 1px solid #405046;
+    border-radius: 6px;
+    color: var(--color-ink);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: #748178;
+  }
+  input[type="checkbox"] {
+    accent-color: var(--color-celadon);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-celadon);
+    outline-offset: 3px;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3d5542;
+    border-radius: 6px;
+  }
+}
+
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-celadon);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--color-celadon) 40%, transparent);
 }
