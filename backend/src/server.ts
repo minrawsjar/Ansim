@@ -1,5 +1,6 @@
 import './env';
 import fs from 'node:fs';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,17 @@ import {
 
 const app = new Hono().basePath('/api');
 app.onError((e, c) => c.json({ error: e.message }, 400));
+
+// Optional lock for when the backend is reachable from the internet (for example through a tunnel).
+// With BACKEND_KEY set, every request must carry it in x-ansim-key. The frontend proxy adds it.
+const BACKEND_KEY = process.env.BACKEND_KEY;
+const digest = (s: string) => createHash('sha256').update(s).digest();
+if (BACKEND_KEY) {
+  app.use('*', async (c, next) => {
+    if (!timingSafeEqual(digest(c.req.header('x-ansim-key') ?? ''), digest(BACKEND_KEY))) return c.json({ error: 'Missing or wrong backend key' }, 401);
+    await next();
+  });
+}
 
 const id = (s: string) => {
   const n = Number(s);
