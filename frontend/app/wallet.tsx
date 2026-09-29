@@ -6,30 +6,37 @@ import { api, connectTronLink, tronLinkState, tronscanAddress } from './lib';
 type State = Awaited<ReturnType<typeof tronLinkState>>;
 const BUTTON = 'inline-flex items-center gap-2 rounded-[7px] border px-3.5 py-2.5 text-xs font-semibold whitespace-nowrap transition disabled:opacity-50';
 
-// The owner's TronLink in the header. Connecting asks TronLink for the account and switches it to Nile;
-// signing the payment limits, approving a batch and freezing the vault then use this account.
-export function ConnectWallet() {
-  const [s, setS] = useState<State | null>(null);
-  const [owner, setOwner] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// TronLink's account and network, kept current: TronLink injects itself shortly after the page loads and
+// posts a message when the account or network changes. Never opens a popup.
+export function useTronLink() {
+  const [state, setState] = useState<State | null>(null);
   const refresh = useCallback(() => {
-    tronLinkState().then(setS).catch(() => {});
+    tronLinkState().then(setState).catch(() => {});
   }, []);
-
   useEffect(() => {
-    // TronLink injects itself shortly after the page loads and posts a message when the account or network changes.
     const timers = [0, 800, 2500].map((ms) => setTimeout(refresh, ms));
     const onMessage = (e: MessageEvent) => {
       if (e.data?.isTronLink || e.data?.message?.action) refresh();
     };
     window.addEventListener('message', onMessage);
-    api<{ owner: string } | null>('/api/vault').then((v) => setOwner(v?.owner ?? null)).catch(() => {});
     return () => {
       timers.forEach(clearTimeout);
       window.removeEventListener('message', onMessage);
     };
   }, [refresh]);
+  return { state, refresh };
+}
+
+// The owner's TronLink in the header. Connecting asks TronLink for the account and switches it to Nile;
+// signing the payment limits, approving a batch and freezing the vault then use this account.
+export function ConnectWallet() {
+  const { state: s, refresh } = useTronLink();
+  const [owner, setOwner] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api<{ owner: string } | null>('/api/vault').then((v) => setOwner(v?.owner ?? null)).catch(() => {});
+  }, []);
 
   const connect = async () => {
     setBusy(true);
