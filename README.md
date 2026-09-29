@@ -40,7 +40,9 @@ The agent must never pay outside the signed policy: over the budget once fees ar
 - **Inside every permit.** Each GasFree permit carries its own `maxFee` and `deadline`, capped at the policy deadline, and GasFree's controller contract enforces both on chain.
 - **Rows that can never be paid.** Invalid, reported and Tether-frozen wallets stay blocked even if the operator tries to confirm them.
 
-Payments cannot happen twice. Each row is bound to one nonce and one signed permit, saved before any network call. If a response is lost, Ansim resends the same signed permit, which can execute at most once. It signs a new permit only after the old one's deadline has passed with its nonce unused.
+Payments cannot happen twice. Each row is bound to one nonce and one signed permit, saved before any network call. If a response is lost, Ansim resends the same signed permit, which can execute at most once. It signs a new permit only when GasFree has rejected the old one, or after the old one's deadline has passed with its nonce unused. GasFree allows one pending transfer per account, so rows are paid one after another.
+
+Every submission carries Ansim's own request ID, which is stored next to GasFree's trace ID and the transaction hash in the log and the export.
 
 ## Repository
 
@@ -60,7 +62,7 @@ npm run setup              # Nile test wallets in backend/.env.local, demo data 
 
 Then fill in `backend/.env.local`:
 
-- `GASFREE_API_KEY` and `GASFREE_API_SECRET` from the GasFree Developers Center
+- `GASFREE_API_KEY` and `GASFREE_API_SECRET` from [developer.gasfree.io](https://developer.gasfree.io/)
 - `KILN_BASE_URL` and `KILN_API_KEY` from the FuriosaAI developer kit
 - Send Nile TRX from the [Nile faucet](https://nileex.io/join/getJoinPage) to the notary address that setup printed
 
@@ -143,4 +145,5 @@ How the design avoids inference:
 - [Financial News: crypto voice-phishing refunds from 1 October 2026](https://www.fnnews.com/news/202607151657505105)
 - [Spark: Korea to Vietnam remittance costs](https://www.spark.money/research/crypto-remittance-corridor-economics)
 - [FuriosaAI: gpt-oss-120b on two RNGD cards](https://furiosa.ai/blog/serving-gpt-oss-120b-at-5-8-ms-tpot-with-two-rngd-cards-compiler-optimizations-in-practice)
-- [GasFree SDK reference](https://github.com/madmatvey/gasfree_sdk)
+- [GasFree developer documentation](https://docs.gasfree.io/)
+- [TRON developer documentation](https://developers.tron.network/)
