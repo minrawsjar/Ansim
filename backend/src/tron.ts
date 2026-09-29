@@ -116,15 +116,19 @@ export async function findUsdtTransfer(from: string, to: string, value: number, 
 /* ---------------- wallet history (mainnet) ---------------- */
 
 // Real families' wallets have their history on mainnet, so the risk check reads mainnet even in the Nile demo.
+// Public TronGrid rate-limits shared server IPs (HTTP 429), so back off and try again a few times.
 async function grid(path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`https://api.trongrid.io${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json', ...(gridKey ? { 'TRON-PRO-API-KEY': gridKey } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) throw new Error(`TronGrid answered ${res.status}`);
-  return res.json();
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`https://api.trongrid.io${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json', ...(gridKey ? { 'TRON-PRO-API-KEY': gridKey } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.ok) return res.json();
+    if (res.status !== 429 || attempt >= 3) throw new Error(`TronGrid answered ${res.status}`);
+    await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+  }
 }
 
 export async function walletFacts(address: string) {
