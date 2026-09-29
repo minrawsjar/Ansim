@@ -171,7 +171,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
           <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid gap-3 rounded-lg border border-[#26382c] bg-sunken p-4">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
               <label className="grid gap-2 text-[11px] text-muted">Name
-                <input id="contact-name" required autoComplete="off" placeholder="Nguyen Thi Lan" className="px-3 py-2.5 text-sm" {...field('name')} />
+                <input id="contact-name" required autoComplete="off" placeholder="Recipient’s full name" className="px-3 py-2.5 text-sm" {...field('name')} />
               </label>
               <label className="grid gap-2 text-[11px] text-muted">Country
                 <input id="contact-country" autoComplete="off" placeholder="Vietnam" className="px-3 py-2.5 text-sm" {...field('country')} />
@@ -652,6 +652,15 @@ export default function Console() {
   useEffect(() => {
     load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
+
+  // A new policy's registry record confirms a few seconds after signing. Look again until it shows, for up to a minute.
+  const recording = policy.policy?.status === 'ACTIVE' && !policy.policy.anchor_tx ? policy.policy.id : null;
+  useEffect(() => {
+    if (!recording) return;
+    let tries = 0;
+    const t = setInterval(() => (++tries > 15 ? clearInterval(t) : load()), 4000);
+    return () => clearInterval(t);
+  }, [recording, load]);
 
   return (
     <div>

@@ -193,11 +193,12 @@ const VAULT_ERRORS: Record<string, string> = Object.fromEntries(
   ].map(([sig, text]) => [utils.ethersUtils.id(sig).slice(2, 10), text]),
 );
 
-// Waits for a contract call to land. Throws with the contract's own reason if it reverted.
+// Waits for a contract call to land in a block. Throws with the contract's own reason if it reverted.
+// Reads the full node, which answers within a block; the solidified node takes about a minute.
 async function confirm(txid: string, errors: Record<string, string>, what: string) {
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const info: any = await tw.trx.getTransactionInfo(txid);
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const info: any = await tw.trx.getUnconfirmedTransactionInfo(txid).catch(() => null); // rate limits: keep polling
     if (!info?.receipt) continue;
     if (info.receipt.result === 'SUCCESS') return txid;
     const data = String(info.contractResult?.[0] ?? '');

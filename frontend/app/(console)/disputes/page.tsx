@@ -90,7 +90,7 @@ export default function DisputesPage() {
 
       <Card eyebrow="Step 1" title="Find the payment">
         <form className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={(e) => { e.preventDefault(); search(); }}>
-          <input id="dispute-q" required minLength={2} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nguyen Van An, 9월 생활비, T… wallet or transaction hash" className="px-3 py-2.5 text-sm" />
+          <input id="dispute-q" required minLength={2} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Sender 1, Dummy 2, 9월 생활비, T… wallet or transaction hash" className="px-3 py-2.5 text-sm" />
           <Button kind="primary" type="submit" busy={busy === 'search'}>Search →</Button>
         </form>
       </Card>

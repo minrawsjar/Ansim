@@ -153,16 +153,17 @@ export async function activatePolicy(input: { id: number; signature?: string; ow
   db.prepare("UPDATE policies SET status = 'REPLACED' WHERE status IN ('ACTIVE', 'STOPPED')").run();
   db.prepare("UPDATE policies SET status = 'ACTIVE', owner = ?, signature = ?, signed_by = ?, policy_hash = ? WHERE id = ?").run(owner, signature, signedBy, hash, p.id);
   logEvent('POLICY_ACTIVATED', { policyId: p.id, policyHash: hash, owner, signedBy, payer: p.payer, budget: p.budget, perPayment: p.per_payment, perPayeeMonthly: p.per_payee_monthly, deadline: p.deadline, payeesHash: p.payees_hash });
-  try {
-    const key = recordKey(p.id);
-    const txid = await recordPolicy({ id: key, hash, payer: p.payer, owner, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline });
-    if (txid) {
-      db.prepare('UPDATE policies SET anchor_tx = ?, record_key = ? WHERE id = ?').run(txid, key, p.id);
+  // The registry record lands in the background, so signing returns at once. The key is saved first,
+  // so a Stop pressed before the record confirms still names the right record.
+  const key = recordKey(p.id);
+  db.prepare('UPDATE policies SET record_key = ? WHERE id = ?').run(key, p.id);
+  recordPolicy({ id: key, hash, payer: p.payer, owner, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline })
+    .then((txid) => {
+      if (!txid) return;
+      db.prepare('UPDATE policies SET anchor_tx = ? WHERE id = ?').run(txid, p.id);
       logEvent('POLICY_RECORDED', { policyId: p.id, recordKey: key, txid });
-    }
-  } catch (e) {
-    logEvent('POLICY_RECORD_FAILED', { policyId: p.id, error: msg(e) });
-  }
+    })
+    .catch((e) => logEvent('POLICY_RECORD_FAILED', { policyId: p.id, error: msg(e) }));
   return getPolicy(p.id);
 }
 

@@ -45,3 +45,4 @@ next-env.d.ts
 !.env.example
 /contracts/build/
 /backend/data/exports/
+/backend/data/*.local.json

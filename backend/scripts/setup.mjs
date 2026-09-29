@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { TronWeb } from 'tronweb';
 import * as XLSX from 'xlsx';
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { keccak_256 } from '@noble/hashes/sha3';
 
 const ENV = new URL('../.env.local', import.meta.url);
 const DATA = new URL('../data/', import.meta.url);
@@ -70,17 +72,22 @@ const addressFrom = (body20) => {
 };
 const randomAddress = () => addressFrom(randomBytes(20));
 
-// Address poisoning demo: find two real, valid addresses that share their first 4 and last 4 characters.
-// A birthday search over random addresses finds a pair in about a million tries.
-function lookalikePair() {
+// Address poisoning demo: two real wallets, with private keys, that share their first 4 and last 4
+// characters. A birthday search needs about two million keys. Consecutive keys are cheap: each public
+// key is the previous one plus the curve's generator, so no key needs a full multiplication.
+function lookalikeKeys() {
+  const n = secp256k1.CURVE.n;
+  const k0 = BigInt('0x' + randomBytes(32).toString('hex')) % (n - 100_000_000n);
+  const G = secp256k1.ProjectivePoint.BASE;
+  const hex = (k) => k.toString(16).padStart(64, '0');
+  let P = G.multiply(k0);
   const seen = new Map();
-  const seed = randomBytes(16);
-  const at = (i) => addressFrom(sha(Buffer.concat([seed, Buffer.from(String(i))])).subarray(0, 20));
-  for (let i = 0; i < 20_000_000; i++) {
-    const a = at(i);
+  for (let i = 1; i < 60_000_000; i++) {
+    P = P.add(G);
+    const a = addressFrom(Buffer.from(keccak_256(P.toRawBytes(false).subarray(1))).subarray(12));
     const k = a.slice(0, 4) + a.slice(-4);
     const j = seen.get(k);
-    if (j !== undefined) return [at(j), a];
+    if (j !== undefined) return [{ address: TronWeb.address.fromPrivateKey(hex(k0 + BigInt(j))), privateKey: hex(k0 + BigInt(j)) }, { address: a, privateKey: hex(k0 + BigInt(i)) }];
     seen.set(k, i);
   }
   throw new Error('No lookalike pair found');
@@ -100,21 +107,27 @@ async function frozenAddress() {
   throw new Error('Could not find a frozen USDT wallet');
 }
 
-console.log('\nSearching for a lookalike address pair...');
+console.log('\nSearching for a lookalike wallet pair...');
 const t0 = Date.now();
-const [lan, poisoned] = lookalikePair();
-console.log(`  found ${lan} / ${poisoned} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+const [first, poisoner] = lookalikeKeys();
+const poisoned = poisoner.address;
+console.log(`  found ${first.address} / ${poisoned} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 const frozen = await frozenAddress();
 console.log(`  Tether-frozen wallet: ${frozen}`);
 
-const payees = [
-  { name: 'Nguyen Thi Lan', country: 'Vietnam', address: lan, usual: 3 },
-  { name: 'Tran Van Minh', country: 'Vietnam', address: randomAddress(), usual: 2.5 },
-  { name: 'Maria Santos', country: 'Philippines', address: randomAddress(), usual: 2 },
-  { name: 'Sita Gurung', country: 'Nepal', address: randomAddress(), usual: 3 },
-  { name: 'Juan dela Cruz', country: 'Philippines', address: randomAddress(), usual: 2 },
-  { name: 'Ram Thapa', country: 'Nepal', address: randomAddress(), usual: 2 },
-];
+// Demo contacts are real Nile wallets named Dummy 1 to Dummy 6. Their private keys go to
+// data/demo-wallets.local.json (git-ignored), so a wallet can be opened in TronLink to watch USDT arrive.
+const wallets = [first];
+for (let i = 0; i < 5; i++) {
+  const a = await TronWeb.createAccount();
+  wallets.push({ address: a.address.base58, privateKey: a.privateKey });
+}
+const COUNTRIES = ['Vietnam', 'Vietnam', 'Philippines', 'Nepal', 'Philippines', 'Nepal'];
+const USUAL = [3, 2.5, 2, 3, 2, 2];
+const payees = wallets.map((w, i) => ({ name: `Dummy ${i + 1}`, country: COUNTRIES[i], address: w.address, usual: USUAL[i] }));
+const keyFile = new URL('demo-wallets.local.json', DATA);
+fs.writeFileSync(keyFile, JSON.stringify(wallets.map((w, i) => ({ name: `Dummy ${i + 1}`, ...w })), null, 2));
+fs.chmodSync(keyFile, 0o600);
 const [P1, P2, P3, P4, P5, P6] = payees.map((p) => p.address);
 const mule = randomAddress();
 const reportedWallet = randomAddress();
@@ -122,20 +135,21 @@ let typo = P5;
 while (TronWeb.isAddress(typo)) typo = P5.slice(0, 20) + ALPHABET[Math.floor(Math.random() * 58)] + P5.slice(21);
 
 const header = ['송금인', '수취인', '수취인 지갑주소', '금액(USDT)', '비고'];
+// Senders are the workers in Korea. Recipients 7 to 9 are not contacts: the mule, frozen and reported wallets.
 const rows = [
-  ['Nguyen Van An', 'Nguyen Thi Lan', P1, '3.00', '9월 생활비'],
-  ['Tran Quoc Bao', 'Tran Van Minh', P2, '2.50', '9월 생활비'],
-  ['Maria Reyes', 'Maria Santos', P3, '2.00', '학비 tuition'],
-  ['Bikash Gurung', 'Sita Gurung', P4, '10.00', '추석 보너스 송금'],
-  ['Tran Quoc Bao', 'Tran Van Minh', P2, '2.50', '9월 생활비'],
-  ['Nguyen Van An', 'Nguyen Thi Lan', poisoned, '3.00', '9월 생활비 (새 지갑)'],
-  ['Juan Cruz', 'Juan dela Cruz', typo, '2.00', 'rent'],
-  ['김민수', 'Le Van Hung', mule, '1.00', '대리 송금'],
-  ['박지훈', 'Le Van Hung', mule, '1.00', '대리 송금'],
-  ['최서연', 'Le Van Hung', mule, '1.00', '대리 송금'],
-  ['Sokha Chan', 'Chan Dara', frozen, '2.00', '가족 송금'],
-  ['Aung Min', 'Hla Hla', reportedWallet, '1.50', '급전 요청'],
-  ['Ram Bahadur', 'Ram Thapa', P6, '2.00', '9월 생활비'],
+  ['Sender 1', 'Dummy 1', P1, '3.00', '9월 생활비'],
+  ['Sender 2', 'Dummy 2', P2, '2.50', '9월 생활비'],
+  ['Sender 3', 'Dummy 3', P3, '2.00', '학비 tuition'],
+  ['Sender 4', 'Dummy 4', P4, '10.00', '추석 보너스 송금'],
+  ['Sender 2', 'Dummy 2', P2, '2.50', '9월 생활비'],
+  ['Sender 1', 'Dummy 1', poisoned, '3.00', '9월 생활비 (새 지갑)'],
+  ['Sender 5', 'Dummy 5', typo, '2.00', 'rent'],
+  ['Sender 7', 'Dummy 7', mule, '1.00', '대리 송금'],
+  ['Sender 8', 'Dummy 7', mule, '1.00', '대리 송금'],
+  ['Sender 9', 'Dummy 7', mule, '1.00', '대리 송금'],
+  ['Sender 10', 'Dummy 8', frozen, '2.00', '가족 송금'],
+  ['Sender 11', 'Dummy 9', reportedWallet, '1.50', '급전 요청'],
+  ['Sender 6', 'Dummy 6', P6, '2.00', '9월 생활비'],
 ];
 
 fs.writeFileSync(new URL('payees.json', DATA), JSON.stringify(payees, null, 2));
@@ -145,4 +159,4 @@ fs.writeFileSync(new URL('demo/ansim-demo-payouts.csv', DATA), '﻿' + csv);
 const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), '송금목록');
 fs.writeFileSync(new URL('demo/ansim-demo-payouts.xlsx', DATA), XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
-console.log('\nWrote backend/data/payees.json, reported.json and demo/ansim-demo-payouts.csv/.xlsx');
+console.log('\nWrote backend/data/payees.json, reported.json, demo/ansim-demo-payouts.csv/.xlsx and demo-wallets.local.json (private keys, git-ignored)');

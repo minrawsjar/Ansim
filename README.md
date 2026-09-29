@@ -135,20 +135,20 @@ In that test, a second row to a payee left off the policy was refused and record
 | AnsimVault contract | [TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k](https://nile.tronscan.org/#/contract/TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k) |
 | 997.90 USDT moved from the GasFree account into the vault | [e0e3cf0a…ece43](https://nile.tronscan.org/#/transaction/e0e3cf0acfa2d8d41530601dc837d0d0d48f54938ccd60a815e95f7f4d4ece43) |
 | Vault release for an approved batch: 1.00 + 2 × 0.30 | [77883b21…acd10](https://nile.tronscan.org/#/transaction/77883b217d9f03d809fc4d8bf5e0864ef6b5701c55825d3d3b6e22ce407acd10) |
-| Payment to Nguyen Thi Lan, 0.50 USDT | [86707aac…de3f9](https://nile.tronscan.org/#/transaction/86707aac066fb47e14fa1df5c3862ba1081dbba2b48cb2c249f279a2dcdde3f9) |
-| Payment to Tran Van Minh, 0.50 USDT | [cab75dcc…c2a1](https://nile.tronscan.org/#/transaction/cab75dccb8e1e2963ee6a2935e784566bf5d67c7a62ab055bb1755a0fa8ac2a1) |
+| Payment to an earlier demo wallet, 0.50 USDT | [86707aac…de3f9](https://nile.tronscan.org/#/transaction/86707aac066fb47e14fa1df5c3862ba1081dbba2b48cb2c249f279a2dcdde3f9) |
+| Payment to a second earlier demo wallet, 0.50 USDT | [cab75dcc…c2a1](https://nile.tronscan.org/#/transaction/cab75dccb8e1e2963ee6a2935e784566bf5d67c7a62ab055bb1755a0fa8ac2a1) |
 | Batch sealed in the registry | [1586d821…b7278](https://nile.tronscan.org/#/transaction/1586d821730cd872a490adafd2e6cbf8260ded48130b53849a16cab32d2b7278) |
 | Owner froze the vault | [29fea4c8…ff35f8](https://nile.tronscan.org/#/transaction/29fea4c879f0a64959e8251367cf009ae11fdf34df5126dab7317e22e8ff35f8) |
 
 ## Demo runs
 
-The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추석 보너스), and 8 that must not be paid. Those are a duplicate, a lookalike of a known payee's wallet, an invalid address, three senders paying one new wallet, a Tether-frozen wallet and a reported wallet.
+The demo contacts are real Nile wallets named Dummy 1 to Dummy 6; `npm run setup -- --force-data` creates them and saves their private keys in `backend/data/demo-wallets.local.json`, which git ignores, so any of them can be opened in TronLink to watch payments arrive. The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추석 보너스), and 8 that must not be paid. Those are a duplicate, a lookalike of a known payee's wallet, an invalid address, three senders paying one new wallet, a Tether-frozen wallet and a reported wallet.
 
 | Run | Condition | Expected outcome | Transaction | Log event |
 |---|---|---|---|---|
 | 1 | Budget 30 USDT, all payees | 5 paid, 8 held; a dropped response on line 3 recovers without a second payment | _fill in_ | _fill in_ |
 | 2 | Budget cut to 8 USDT | Lines 4 and 14 refused, over budget once fees are added | _fill in_ | _fill in_ |
-| 3 | Maria Santos removed from the payee list | Line 4 refused, payee not allowed | _fill in_ | _fill in_ |
+| 3 | Dummy 3 removed from the payee list | Line 4 refused, payee not allowed | _fill in_ | _fill in_ |
 | 4 | Owner presses Stop mid-batch | Remaining rows refused, stopped by the owner | _fill in_ | _fill in_ |
 
 ## Alerts
