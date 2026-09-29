@@ -205,6 +205,25 @@ export default function BatchPage() {
           </Button>
         )}
         {batch.status === 'PAUSED' && !live && <Button busy={busy === 'recover'} onClick={() => act('recover')}>Recover unknown payments</Button>}
+        {live && (
+          <Button
+            kind="danger"
+            busy={busy === 'stop'}
+            onClick={async () => {
+              setBusy('stop');
+              try {
+                await api('/api/policy/stop', { json: {} });
+                await load();
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(null);
+              }
+            }}
+          >
+            Stop all payments
+          </Button>
+        )}
         <a href={`/api/batches/${batch.id}/export?format=csv`} className="inline-flex items-center rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:border-celadon">Export CSV</a>
         <a href={`/api/batches/${batch.id}/export`} className="inline-flex items-center rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:border-celadon">Export evidence</a>
         {batch.status === 'CLOSED' && <Button busy={busy === 'receipt'} onClick={() => act('receipt')}>Write receipt with AI</Button>}

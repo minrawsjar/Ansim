@@ -74,6 +74,7 @@ Open the console, press **Pre-check**, and send Nile test USDT to the GasFree ad
 ```bash
 npm run check                               # unit tests for the policy gate, screening, parsing and log
 npm run verify -- path/to/ansim-evidence.json   # independent audit of an exported batch
+npm run reset                               # clear the local database before a clean demo
 ```
 
 ## Demo runs

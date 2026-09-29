@@ -8,7 +8,8 @@
     "start": "tsx src/server.ts",
     "setup": "node scripts/setup.mjs",
     "verify": "node scripts/verify.mjs",
-    "check": "tsx --test src/core.test.ts"
+    "check": "tsx --test src/core.test.ts",
+    "reset": "rm -f data/ansim.db data/ansim.db-wal data/ansim.db-shm && echo Cleared the local database"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
