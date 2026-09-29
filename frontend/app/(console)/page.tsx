@@ -425,9 +425,18 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
 
 // The owner says what to pay in plain words; the agent drafts a batch from the contacts. The batch still
 // goes through every check, the owner's approval and the vault before anything moves.
+// Example instructions. The last one asks for more than the limits allow, to show the refusals.
+const AGENT_PROMPTS = [
+  'Pay everyone their usual monthly support.',
+  'Pay everyone their usual amount, but skip anyone new or with a risky wallet.',
+  'Send a 5 USDT Chuseok bonus to each contact in Vietnam.',
+  'Pay only the families in Nepal their usual amount.',
+  'Send 20 USDT to every contact.',
+];
+
 function AgentCard() {
   const router = useRouter();
-  const [instruction, setInstruction] = useState('Pay everyone their usual monthly support. Skip anyone new or with a risky wallet.');
+  const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const plan = async () => {
@@ -445,8 +454,27 @@ function AgentCard() {
     <Card eyebrow="Step 3 · ask the agent" title="Payout agent">
       <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); plan(); }}>
         <ErrorLine error={error} />
-        <textarea id="agent-instruction" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} className="px-3 py-2.5 text-[13px]" />
-        <Button kind="primary" type="submit" busy={busy} className="w-full">Draft a batch →</Button>
+        <div className="flex flex-wrap gap-1.5">
+          {AGENT_PROMPTS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setInstruction(p)}
+              className={`rounded-full border px-2.5 py-1 text-left text-[11px] transition ${instruction === p ? 'border-celadon/60 bg-celadon-soft text-celadon' : 'border-line text-[#c8d1c7] hover:border-edge hover:bg-raised'}`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <textarea
+          id="agent-instruction"
+          rows={3}
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          placeholder="Tell the agent what to pay today, or pick an example above."
+          className="px-3 py-2.5 text-[13px]"
+        />
+        <Button kind="primary" type="submit" busy={busy} disabled={instruction.trim().length < 5} className="w-full">Draft a batch →</Button>
         <p className="text-[11px] leading-relaxed text-muted">
           The model proposes payments only to your contacts, with a reason for each. Code drops anything else, then runs every check. Nothing is paid until the owner approves and the vault releases the money.
         </p>
