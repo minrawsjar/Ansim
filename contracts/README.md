@@ -100,7 +100,9 @@ The notary address needs Nile TRX, from the [Nile faucet](https://nileex.io/join
 | AnsimVault | [`TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k`](https://nile.tronscan.org/#/contract/TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k) | [9aa5af24…d6613](https://nile.tronscan.org/#/transaction/9aa5af2446a900f5cc491b2c23689a00fecf419b9aaadf61790a32ea82dd6613) |
 | AnsimRegistry | [`TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq`](https://nile.tronscan.org/#/contract/TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq) | [3a13f341…d91f82](https://nile.tronscan.org/#/transaction/3a13f341aa5e788e419e207b5ef02dd5ea906fc6b82cdc1f4745a67734d91f82) |
 
-The vault's owner is the operator's TronLink wallet, moved there with `setOwner` in [6866a972…e28bdd](https://nile.tronscan.org/#/transaction/6866a9726a9e0b9033f897bfe68d6b0fa2bf7c4c2d43de253e3789839fe28bdd).
+The vault's owner is the operator's TronLink wallet `TULPNbKuhamDY1FuW3KfHiUzRVzcuFio83`, moved there with `setOwner` in [6866a972…e28bdd](https://nile.tronscan.org/#/transaction/6866a9726a9e0b9033f897bfe68d6b0fa2bf7c4c2d43de253e3789839fe28bdd).
+
+**Funding:** send Nile USDT (`TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`) to the vault address with a plain TRC-20 transfer. Any other token sent there is stuck, and the vault does not accept TRX. See [Funding the Vault](../README.md#funding-the-vault).
 
 ## How verify.mjs Uses Them
 

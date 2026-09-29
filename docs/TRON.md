@@ -74,6 +74,8 @@ Recovery never pays twice:
 3. **Search the chain** if the account's nonce moved.
 4. **Sign a new permit** only once the old one's deadline has passed with its nonce unused.
 
+If the server restarts mid-batch, it resumes the batch on startup. It runs those steps for every in-flight row, then pays the rest.
+
 ## Challenge C Criteria
 
 | Criterion | What Ansim does | Where to see it |
@@ -100,6 +102,8 @@ Text from uploaded files that starts with `=`, `+`, `-` or `@` gets a leading ap
 | Live batch: vault release | [7aa70e5c…64b25](https://nile.tronscan.org/#/transaction/7aa70e5c8316d50823f2e873f50aa0f925c00910afa7c1fcadfd103830464b25) |
 | Live batch: GasFree payment to Dummy 2 in Hanoi | [f2fbcd70…68f05](https://nile.tronscan.org/#/transaction/f2fbcd7018e913960b09a9de1e008150137a02a6d9fd62627a9f4b365c768f05) |
 | Live batch: batch seal | [d4ee79c3…335d1fc](https://nile.tronscan.org/#/transaction/d4ee79c39c67abafb5807c76b1551b8be76c47ed14ce4cceee308dfe7335d1fc) |
+| Six-payment batch resumed after a restart: vault release | [79a31f81…f02a05](https://nile.tronscan.org/#/transaction/79a31f8140a5c3953edbec1d9d6738826d37ad5835641c7aba311a2c5af02a05) |
+| Six-payment batch: seal | [e00e2851…b6b1c2](https://nile.tronscan.org/#/transaction/e00e285194e5b53fffb745c61c683aaef43d1332235e151d919751ce11b6b1c2) |
 | Idle USDT moved into the vault through GasFree | [e0e3cf0a…ece43](https://nile.tronscan.org/#/transaction/e0e3cf0acfa2d8d41530601dc837d0d0d48f54938ccd60a815e95f7f4d4ece43) |
 
 The full list is in the [main README](../README.md#on-chain-evidence).

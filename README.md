@@ -103,6 +103,14 @@ Ansim puts the agent between two things it cannot change: the owner's signature 
 | Payer's GasFree account | `TW6BntBhCJbEZAQy88wU3tJEwcPL6N8qwX` | Only what the vault released for the current batch |
 | Notary and vault agent | `TVHXjWjM9MhMX9STBL16BprC1PSmoGXvNL` | Nile TRX for registry and vault calls |
 
+### Funding the Vault
+
+Send **Nile test USDT** (TRC-20 `TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`) to the vault, `TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k`, with a plain transfer from TronLink on Nile. There is no deposit function to call. The sending wallet needs a little Nile TRX for energy, from the [Nile faucet](https://nileex.io/join/getJoinPage). The console's vault card shows the new balance within seconds.
+
+- **Only Nile USDT.** The vault can only release or withdraw that one token contract, so any other token sent there is stuck. It does not accept TRX.
+- **Prefer the vault to the GasFree account.** Money in the vault leaves only for a batch the owner approved. The GasFree account is the payer key's hot wallet. USDT sent there can be moved into the vault with **Move it into the vault**.
+- **Taking money out:** the owner calls `withdraw(to, amount)` from TronLink.
+
 ### On-Chain Evidence
 
 A complete live batch from the public console on 30 September 2026. The owner signed the limits and the approval in TronLink; the agent drafted the batch.
@@ -114,7 +122,17 @@ A complete live batch from the public console on 30 September 2026. The owner si
 | GasFree payment of 2.50 USDT to Dummy 2 in Hanoi | [f2fbcd70…68f05](https://nile.tronscan.org/#/transaction/f2fbcd7018e913960b09a9de1e008150137a02a6d9fd62627a9f4b365c768f05) |
 | Batch closing hash sealed in AnsimRegistry | [d4ee79c3…335d1fc](https://nile.tronscan.org/#/transaction/d4ee79c39c67abafb5807c76b1551b8be76c47ed14ce4cceee308dfe7335d1fc) |
 
-`verify.mjs` passes all 16 checks for that batch against the chain. Earlier tests on Nile:
+`verify.mjs` passes all 16 checks for that batch against the chain.
+
+A six-payment live batch the same day, which a backend deploy interrupted after four payments had been sent. The server resumed it on restart, and each family was paid exactly once:
+
+| Step | Transaction |
+|---|---|
+| AnsimVault released 14.50 + 6 × 0.30 USDT for policy #8 | [79a31f81…f02a05](https://nile.tronscan.org/#/transaction/79a31f8140a5c3953edbec1d9d6738826d37ad5835641c7aba311a2c5af02a05) |
+| Payments 5 and 6, sent after the restart | [16495083…a0289f](https://nile.tronscan.org/#/transaction/164950830a5f696ef6117847088e68ff9370c7854e19bde5e537a84143a0289f), [7ca6507c…559b3a](https://nile.tronscan.org/#/transaction/7ca6507c894180700bcc2640f7ccc4f0278718576a8652ad6427fd4e2e559b3a) |
+| Batch closing hash sealed in AnsimRegistry | [e00e2851…b6b1c2](https://nile.tronscan.org/#/transaction/e00e285194e5b53fffb745c61c683aaef43d1332235e151d919751ce11b6b1c2) |
+
+`verify.mjs` passes all 36 checks for it. Earlier tests on Nile:
 
 | Test | Transaction |
 |---|---|
@@ -254,6 +272,8 @@ Each row is bound to one nonce and one signed permit, saved before any network c
 4. **Sign again only when it's safe.** A new permit is signed only if the old one's deadline passed with its nonce unused.
 
 The demo drops the response for one line on purpose (`SIMULATE_LOST_RESPONSE_LINE`) and shows the recovery.
+
+**A restart mid-batch** (a deploy or a crash) leaves the batch marked RUNNING with nothing paying it. On startup the server resumes every such batch. It settles each in-flight row through the four steps above first, then pays the rest through the policy gate. The journal records `BATCH_RESUMED`.
 
 ## Evidence: Deep Dive
 
@@ -396,7 +416,7 @@ npm run deploy:contracts                 # AnsimRegistry
 VAULT_OWNER=<your TronLink address> npm run deploy:vault
 ```
 
-Then send Nile test USDT to the vault, or to the payer's GasFree account shown in the pre-check and press **Move it into the vault**.
+Then send Nile test USDT to the vault ([Funding the Vault](#funding-the-vault)), or to the payer's GasFree account shown in the pre-check and press **Move it into the vault**.
 
 ### 5. Run
 
