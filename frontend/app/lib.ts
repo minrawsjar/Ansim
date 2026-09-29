@@ -59,18 +59,34 @@ export const BANK_FEE_RATE = 0.0515;
 // GasFree's Nile transfer fee when this was built. The pre-check shows the live value.
 export const GASFREE_FEE = 300_000;
 
+// Nile testnet, the chainId inside every Ansim signature (3448148188). TronLink refuses to sign
+// typed data for a chain other than the one it is connected to.
+const NILE_CHAIN_ID = '0xcd8690dc';
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Signs TIP-712 typed data in TronLink. Used for the payment limits and for batch approvals.
 export async function signWithTronLink(draft: TypedDraft) {
   const w = window as any;
   if (!w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
   if (w.tronLink?.request) await w.tronLink.request({ method: 'tron_requestAccounts' });
-  const tronWeb = w.tronLink?.tronWeb || w.tronWeb;
+  let tronWeb = w.tronLink?.tronWeb || w.tronWeb;
+  if (!/nile/i.test(tronWeb?.fullNode?.host ?? '')) {
+    // Ask TronLink to switch to Nile. Older versions lack this request; signing then fails with the message below.
+    const provider = w.tron ?? w.tronLink;
+    await provider?.request?.({ method: 'wallet_switchEthereumChain', params: [{ chainId: NILE_CHAIN_ID }] }).catch(() => {});
+    tronWeb = w.tronLink?.tronWeb || w.tronWeb;
+  }
   const owner: string | undefined = tronWeb?.defaultAddress?.base58;
   if (!owner) throw new Error('Unlock TronLink and connect an account first.');
   const sign = tronWeb.trx.signTypedData ?? tronWeb.trx._signTypedData;
-  const signature: string = await sign.call(tronWeb.trx, draft.domain, draft.types, draft.value);
-  return { owner, signature };
+  try {
+    const signature: string = await sign.call(tronWeb.trx, draft.domain, draft.types, draft.value);
+    return { owner, signature };
+  } catch (e) {
+    const text = String((e as { message?: unknown } | null)?.message ?? e);
+    if (/chain ?id/i.test(text)) throw new Error('TronLink is on another network. Open TronLink, switch the network to Nile Testnet, then sign again.');
+    throw e;
+  }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 export const tronscanAddress = (a: string) => `https://nile.tronscan.org/#/address/${a}`;
