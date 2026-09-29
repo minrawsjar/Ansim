@@ -1,0 +1,14 @@
+{
+  "name": "ansim-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "node scripts/compile.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "solc": "^0.8.26",
+    "tronweb": "^6.5.1"
+  }
+}

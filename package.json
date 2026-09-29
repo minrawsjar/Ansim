@@ -1,0 +1,12 @@
+{
+  "name": "ansim",
+  "private": true,
+  "workspaces": ["frontend", "backend", "contracts"],
+  "scripts": {
+    "dev": "npm run dev -w backend & npm run dev -w frontend & wait",
+    "setup": "npm run setup -w backend",
+    "deploy:contracts": "npm run deploy -w contracts",
+    "verify": "npm run verify -w backend --",
+    "check": "npm run check -w backend && npm run compile -w contracts"
+  }
+}
