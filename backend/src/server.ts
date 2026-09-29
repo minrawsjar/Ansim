@@ -20,8 +20,10 @@ app.onError((e, c) => c.json({ error: e.message }, 400));
 // With BACKEND_KEY set, every request must carry it in x-ansim-key. The frontend proxy adds it.
 const BACKEND_KEY = process.env.BACKEND_KEY;
 const digest = (s: string) => createHash('sha256').update(s).digest();
+app.get('/health', (c) => c.json({ ok: true })); // open, for the host's health check
 if (BACKEND_KEY) {
   app.use('*', async (c, next) => {
+    if (c.req.path === '/api/health') return next();
     if (!timingSafeEqual(digest(c.req.header('x-ansim-key') ?? ''), digest(BACKEND_KEY))) return c.json({ error: 'Missing or wrong backend key' }, 401);
     await next();
   });
