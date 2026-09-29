@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '../lib';
-import { Card, ErrorLine, Stat } from '../ui';
+import { api } from '../../lib';
+import { Callout, Card, ErrorLine, Stat } from '../../ui';
 
 type Metrics = {
   model: string;
+  provider: string | null;
   flows: { flow: string; calls: number; prompt: number; completion: number; total: number; avg_ms: number; joules: number }[];
   rowsReviewed: { sent: number; total: number; skippedShare: number | null };
   joulesPerOutputToken: number;
@@ -16,6 +17,7 @@ const FLOW_INFO: Record<string, string> = {
   review_flags: 'Explains all flagged rows of a batch in one call. Clean rows are never sent.',
   receipt: 'Writes the owner’s receipt once per finished batch.',
   audit_qa: 'Answers an auditor’s question from the records.',
+  dispute: 'Drafts the answer to a customer’s “did it arrive?” question from the log and the chain.',
 };
 
 export default function MetricsPage() {
@@ -41,8 +43,9 @@ export default function MetricsPage() {
       {!m && !error && <p className="text-muted">Loading…</p>}
       {m && (
         <>
-          <div className="grid grid-cols-2 gap-y-4 rounded-xl border border-line bg-surface px-5 py-5 sm:grid-cols-5 sm:px-6">
+          <div className="grid grid-cols-2 gap-y-4 rounded-xl border border-line bg-surface px-5 py-5 sm:grid-cols-3 lg:grid-cols-6 sm:px-6">
             <Stat label="Model" value={<span className="text-base">{m.model}</span>} />
+            <Stat label="Served by" value={<span className="text-base">{m.provider ?? 'Not configured'}</span>} />
             <Stat label="Calls" value={sum('calls')} />
             <Stat label="Tokens" value={sum('total').toLocaleString()} />
             <Stat label="Est. energy" value={`≤ ${sum('joules').toLocaleString()} J`} />
@@ -80,6 +83,7 @@ export default function MetricsPage() {
           <Card eyebrow="Method note" title="How the energy estimate works">
             <div className="grid gap-3 text-[13px]">
               <p className="rounded-md border border-[#26382c] bg-sunken px-3.5 py-3 font-mono text-xs text-celadon">2 RNGD cards × 180 W × 5.8 ms ≈ {m.joulesPerOutputToken.toFixed(2)} J per output token</p>
+              {m.provider && !/kiln|furiosa/i.test(m.provider) && <Callout tone="warn">These calls are served by {m.provider}, not FuriosaAI hardware, so this estimate does not describe them.</Callout>}
               <p className="text-xs leading-relaxed text-muted">FuriosaAI reports gpt-oss-120b on two RNGD cards at 5.8 ms per output token, with each card well under 180 W. This is an upper bound: real power is lower and batching shares it across many requests. Prompt tokens are processed in parallel and are left out of the estimate.</p>
             </div>
           </Card>

@@ -509,8 +509,15 @@ export function metrics() {
   const reviews = (db.prepare("SELECT body FROM events WHERE type = 'AGENT_REVIEW'").all() as { body: string }[]).map((e) => JSON.parse(e.body).data);
   const sent = reviews.reduce((s, r) => s + r.sent, 0);
   const total = reviews.reduce((s, r) => s + r.total, 0);
+  let provider: string | null = null;
+  try {
+    provider = process.env.KILN_BASE_URL ? new URL(process.env.KILN_BASE_URL).host : null;
+  } catch {
+    provider = null;
+  }
   return {
     model: MODEL,
+    provider,
     flows: flows.map((f) => ({ ...f, joules: Math.round((f.completion ?? 0) * JOULES_PER_OUTPUT_TOKEN) })),
     rowsReviewed: { sent, total, skippedShare: total ? 1 - sent / total : null },
     joulesPerOutputToken: JOULES_PER_OUTPUT_TOKEN,

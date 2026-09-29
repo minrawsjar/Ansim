@@ -14,13 +14,15 @@ About 1.1 million foreign workers in Korea send money home every month, and the 
 
 ## What it does
 
-1. **The operator keeps a contact book** of the families' wallets. Ansim refuses to save a wallet that is invalid, looks like an existing contact's wallet (address poisoning), is on the reported list or is frozen by Tether. Every added or removed contact is written to the log.
-2. **The owner signs the payment limits** in TronLink: a budget that includes fees, a cap per payment, a deadline and the ticked contacts. It is TIP-712 typed data, and its hash is recorded in the AnsimRegistry contract on Nile.
+1. **The operator keeps a contact book** of the families' wallets. Ansim refuses to save a wallet that is invalid, looks like an existing contact's wallet (address poisoning), is on the reported list or is frozen by Tether. A new contact can be paid only after a waiting period, 3 hours by default, like the delayed transfers (지연이체) Korean banks use against voice phishing. Every added or removed contact is written to the log.
+2. **The owner signs the payment limits** in TronLink: a budget that includes fees, a cap per payment, a cap per contact over 30 days, a deadline and the ticked contacts. It is TIP-712 typed data, and its hash is recorded in the AnsimRegistry contract on Nile.
 3. **The operator imports the day's CSV or Excel file.** Korean headers such as 수취인 지갑주소 and 비고 are mapped automatically.
-4. **Code screens every row** for invalid addresses and amounts, duplicates, payees not in the book, lookalike wallets (address poisoning), three or more senders paying one new wallet (a money-mule pattern), reported scam wallets and Tether's live freeze list. The AI explains only the flagged rows, in Korean and English. The operator fixes, holds or confirms each one.
-5. **A pre-check** shows the GasFree payer account, supported token, balance, and total fees including the one-time activation fee.
-6. **The signer pays each approved row through GasFree**, but only if the policy allows it. Statuses update live: waiting, processing, confirming, paid or failed. A refused row is logged with its reason.
-7. **Reconcile and prove.** The export links every result to its source row and note. The batch's closing log hash is sealed on chain, and one command lets anyone check the batch against the signed policy.
+4. **Code screens every row** for invalid addresses and amounts, duplicates, payees not in the book, lookalike wallets (address poisoning), three or more senders paying one new wallet (a money-mule pattern), reported scam wallets, Tether's live freeze list, contacts still in their waiting period, and transfers at or above Korea's Travel Rule threshold (₩1,000,000) that lack the sender's details. The AI explains only the flagged rows, in Korean and English. The operator fixes, holds or confirms each one.
+5. **A pre-check** shows the GasFree payer account, supported token, balance, and total fees including the one-time activation fee. The batch page also compares the cost with a bank at 5.15%.
+6. **The owner approves the batch.** The operator prepares it; the owner who signed the limits signs the exact rows and total as TIP-712 typed data. Changing any row clears the approval, and every check runs again right before paying.
+7. **The signer pays each approved row through GasFree**, but only if the policy allows it. Statuses update live: waiting, processing, confirming, paid or failed. A refused row is logged with its reason.
+8. **Reconcile and prove.** The export links every result to its source row and note. Each family gets a receipt link in their language (Vietnamese, Tagalog or Nepali, plus Korean). The batch's closing log hash is sealed on chain, and one command lets anyone check the batch against the signed policy and the owner's approval.
+9. **Answer disputes.** The dispute desk finds a payment by name, note, wallet or transaction hash, shows its log events and what the chain says, and drafts a reply in Korean and English.
 
 ## What the AI does, and what stays in code
 
@@ -30,16 +32,18 @@ About 1.1 million foreign workers in Korea send money home every month, and the 
 | Explains flagged rows in Korean and English and suggests fix, hold or pay | The policy gate: budget, cap, payees, deadline, stop |
 | Writes the owner's receipt for a finished batch | Signing, submitting, polling and recovery |
 | Answers an auditor's questions from the records, citing event numbers | The hash-chained log, the registry records and the verify script |
+| Drafts the reply to a customer's "did it arrive?" question from the log and the chain | Waiting periods, Travel Rule holds, owner approval and the family receipts |
 
 A wrong model answer cannot move money. The model never holds a key.
 
 ## The boundary, and where it is enforced
 
-The agent must never pay outside the signed policy: over the budget once fees are added, above the per-payment cap, to a payee not on the list, after the deadline, or after the owner presses Stop.
+The agent must never pay outside the signed policy: over the budget once fees are added, above the per-payment cap, over a contact's 30-day cap, to a payee not on the list, after the deadline, or after the owner presses Stop. It must also never pay a batch the owner has not approved.
 
 - **In the signer.** [`refuseReason`](backend/src/policy.ts) runs before every signature, in [`payRow`](backend/src/orchestrator.ts). It counts everything already paid plus the value and fee cap of payments still in flight. A refusal is recorded in the log, never silent.
 - **Inside every permit.** Each GasFree permit carries its own `maxFee` and `deadline`, capped at the policy deadline, and GasFree's controller contract enforces both on chain.
-- **Rows that can never be paid.** Invalid, reported and Tether-frozen wallets stay blocked even if the operator tries to confirm them.
+- **Rows that can never be paid.** Invalid, reported and Tether-frozen wallets stay blocked even if the operator tries to confirm them. So do contacts still in their waiting period and Travel Rule transfers without the sender's details, until that changes.
+- **Before the batch starts.** The owner's signed approval must match the rows marked to pay under the active policy. [`verify.mjs`](backend/scripts/verify.mjs) checks that signature and that the paid rows are exactly the approved ones.
 
 Payments cannot happen twice. Each row is bound to one nonce and one signed permit, saved before any network call. If a response is lost, Ansim resends the same signed permit, which can execute at most once. It signs a new permit only when GasFree has rejected the old one, or after the old one's deadline has passed with its nonce unused. GasFree allows one pending transfer per account, so rows are paid one after another.
 
@@ -130,6 +134,10 @@ The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추�
 | 3 | Maria Santos removed from the payee list | Line 4 refused, payee not allowed | _fill in_ | _fill in_ |
 | 4 | Owner presses Stop mid-batch | Remaining rows refused, stopped by the owner | _fill in_ | _fill in_ |
 
+## Alerts
+
+With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, the owner gets a Telegram message for every refusal, failure, Stop, new contact, batch approval and finished batch. Create a bot with @BotFather, send it a message, and read the chat id from `https://api.telegram.org/bot<token>/getUpdates`. The console has a test button.
+
 ## Tokens and energy
 
 Every Kiln call is logged under its flow, and the **Tokens & energy** page reports calls, prompt and output tokens, and latency per flow.
@@ -167,16 +175,18 @@ How the design avoids inference:
 | Criterion | Where to see it |
 |---|---|
 | Declared Function & User Need | First line of this README; the table of AI tasks and code |
-| Boundaries & Stopping | Runs 2, 3 and 4; refusals recorded with reasons in the log |
+| Boundaries & Stopping | Runs 2, 3 and 4; the 30-day cap per contact; refusals recorded with reasons in the log |
 | Kiln API Integration & Efficiency | Four Kiln flows on gpt-oss-120b; the Tokens & energy page |
 | Blockchain Integration | GasFree USDT payments on Nile; policy and batch records in AnsimRegistry |
-| Approval & Evidence | Owner grants, watches, stops and gets a receipt; `verify.mjs` rebuilds the answer from the export and the chain |
+| Approval & Evidence | Owner signs the limits and approves each batch, watches, stops, gets Telegram alerts and a receipt; `verify.mjs` rebuilds the answer from the export and the chain; the dispute desk answers customers from the same records |
 
 ## Honest notes
 
 - All code in this repository was written during the hackathon, on 29 and 30 September 2026. The frontend started from `create-next-app`.
 - The reported-wallet list is a stand-in for wallets reported to police and exchanges.
 - `fake-services.mjs` exists only to test the payment and AI logic without keys. Its transaction hashes are made up, and `verify.mjs` correctly fails them against the chain. Its AI replies are marked [fake].
+- The receipt translations were written without a native speaker's check. The KRW rate for the Travel Rule threshold is a setting (`KRW_PER_USDT`), not a live quote.
+- The AI works with any OpenAI-compatible API. With a provider other than Kiln, the energy estimate does not apply, and the Tokens & energy page says so.
 - Unlicensed crypto remittance is illegal in Korea. Ansim is built for licensed operators and adds the controls regulators ask for.
 
 ## Sources

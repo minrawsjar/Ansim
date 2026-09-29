@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { api, usdt, FLAGS, REASONS, type BatchView, type Precheck, type Row } from '../../lib';
-import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink } from '../../ui';
+import { api, usdt, when, signWithTronLink, BANK_FEE_RATE, GASFREE_FEE, FLAGS, REASONS, type BatchView, type Precheck, type Row, type TypedDraft } from '../../../lib';
+import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink } from '../../../ui';
 
 const LINK_BUTTON = 'inline-flex items-center rounded-[7px] border border-line px-3.5 py-2.5 text-xs font-semibold text-[#c8d1c7] transition hover:bg-raised';
 const STATUS_WORD: Record<string, string> = { REVIEW: 'in review', PAUSED: 'paused', CLOSED: 'closed', RUNNING: 'paying' };
@@ -17,6 +17,8 @@ function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean
   const [wallet, setWallet] = useState(r.receiver);
   const [amount, setAmount] = useState(r.amount != null ? String(r.amount / 1e6) : r.amount_raw ?? '');
   const blocking = r.flags.some((f) => FLAGS[f]?.blocking);
+  const [travelOpen, setTravelOpen] = useState(false);
+  const [travel, setTravel] = useState({ originatorId: '', purpose: '' });
 
   const patch = async (body: object) => {
     setError(null);
@@ -81,6 +83,20 @@ function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean
             ) : (
               <button type="button" onClick={() => setEdit(true)} className="text-left text-xs text-celadon hover:underline">Edit wallet or amount</button>
             )}
+            {r.flags.includes('TRAVEL_RULE_INFO') && !travelOpen && (
+              <button type="button" onClick={() => setTravelOpen(true)} className="text-left text-xs text-warn hover:underline">Add Travel Rule details</button>
+            )}
+            {travelOpen && (
+              <form className="grid w-56 gap-1.5" onSubmit={(e) => { e.preventDefault(); patch({ travel }); }}>
+                <input id={`travel-id-${r.id}`} required placeholder="Sender customer ID or birth date" value={travel.originatorId} onChange={(e) => setTravel((t) => ({ ...t, originatorId: e.target.value }))} className="px-2 py-1.5 text-xs" />
+                <input id={`travel-purpose-${r.id}`} required placeholder="Purpose, e.g. family support" value={travel.purpose} onChange={(e) => setTravel((t) => ({ ...t, purpose: e.target.value }))} className="px-2 py-1.5 text-xs" />
+                <div className="flex gap-1">
+                  <Button className="!px-2 !py-1" kind="primary" type="submit">Save</Button>
+                  <Button className="!px-2 !py-1" kind="quiet" type="button" onClick={() => setTravelOpen(false)}>Cancel</Button>
+                </div>
+                <span className="text-[10px] text-muted">Kept off chain and out of the shared log.</span>
+              </form>
+            )}
           </div>
         ) : (
           <span className="text-xs capitalize text-muted">{r.decision}</span>
@@ -94,9 +110,102 @@ function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean
           {r.request_id && <span title={`Request ${r.request_id}${r.trace_id ? `\nGasFree trace ${r.trace_id}` : ''}`} className="font-mono text-[11px] text-muted">req {r.request_id.slice(0, 8)}</span>}
           {r.fee != null && <span className="num font-mono text-[11px] text-muted">fee {usdt(r.fee)}</span>}
           {r.error && r.state !== 'SUCCEED' && <span className="max-w-48 text-[11px] break-words text-warn">{r.error}</span>}
+          {r.travel && <span className="text-[11px] text-celadon">Travel Rule details recorded</span>}
+          {r.receipt_token && (
+            <span className="flex items-center gap-1.5">
+              <a href={`/r/${r.receipt_token}`} target="_blank" rel="noopener" className="text-[11px] text-celadon hover:underline">Family receipt ↗</a>
+              <Copy text={`${window.location.origin}/r/${r.receipt_token}`} />
+            </span>
+          )}
         </div>
       </td>
     </tr>
+  );
+}
+
+// Maker-checker: the operator prepares the batch, the owner signs the exact rows and total before anything is paid.
+function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }) {
+  const { batch, approvalProblem, rows } = view;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pay = rows.filter((r) => r.decision === 'pay');
+  const total = pay.reduce((s, r) => s + (r.amount ?? 0), 0);
+  const a = batch.approval;
+  const approved = !!a && !approvalProblem;
+  const canApprove = batch.status === 'REVIEW' || batch.status === 'PAUSED';
+
+  const approve = async (how: 'tronlink' | 'server') => {
+    setBusy(how);
+    setError(null);
+    try {
+      const body = how === 'server'
+        ? { serverSign: true }
+        : await signWithTronLink(await api<TypedDraft>(`/api/batches/${batch.id}/approval-draft`, { json: {} }));
+      await api(`/api/batches/${batch.id}/approve`, { json: body });
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!approved && !canApprove) return null;
+  return (
+    <Card
+      eyebrow="Maker and checker · TIP-712"
+      title={approved ? 'Approved by the owner' : 'Waiting for the owner’s approval'}
+      action={!approved && canApprove && (
+        <div className="flex flex-wrap gap-2">
+          <Button kind="primary" busy={busy === 'tronlink'} disabled={!pay.length} onClick={() => approve('tronlink')}>Approve in TronLink ↗</Button>
+          <Button kind="secondary" busy={busy === 'server'} disabled={!pay.length} onClick={() => approve('server')}>Approve with demo owner key</Button>
+        </div>
+      )}
+    >
+      <div className="grid gap-3">
+        <ErrorLine error={error} />
+        {approved ? (
+          <p className="text-[13px] text-muted">
+            <Addr a={a!.owner} /> approved <b className="text-ink">{a!.value.count} payments, {usdt(Number(a!.value.total))} USDT</b> on {when(a!.at)}, {a!.signedBy === 'server-demo-key' ? 'with the demo owner key' : 'in TronLink'}. Changing any row clears this approval.
+          </p>
+        ) : (
+          <>
+            {approvalProblem && batch.approval && <Callout tone="warn">{approvalProblem}</Callout>}
+            <p className="text-[13px] text-muted">
+              The operator prepared <b className="text-ink">{pay.length} payments, {usdt(total)} USDT</b>. Nothing is paid until the owner who signed the payment limits signs these exact rows. The signature is checked again by the auditor script.
+            </p>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// What the same payouts would cost through a bank, against GasFree's flat fee per transfer.
+function Savings({ view }: { view: BatchView }) {
+  const { summary, rows } = view;
+  const done = summary.amountPaid > 0;
+  const pay = rows.filter((r) => r.decision === 'pay' && r.state !== 'REFUSED' && r.state !== 'FAILED');
+  const amount = done ? summary.amountPaid : pay.reduce((s, r) => s + (r.amount ?? 0), 0);
+  const fees = done ? summary.fees : pay.length * GASFREE_FEE;
+  if (!amount) return null;
+  const bank = Math.round(amount * BANK_FEE_RATE);
+  const saved = bank - fees;
+  const breakEven = GASFREE_FEE / BANK_FEE_RATE;
+  return (
+    <Card eyebrow={done ? 'Compared with a bank' : 'Estimate before paying'} title={saved >= 0 ? `${usdt(saved)} USDT less than a bank` : 'A bank is cheaper at these test amounts'}>
+      <div className="grid gap-4">
+        <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-4">
+          <Stat label={done ? 'Sent' : 'To send'} value={usdt(amount)} />
+          <Stat label="Bank at 5.15%" value={usdt(bank)} tone="warn" />
+          <Stat label={done ? 'GasFree fees paid' : 'GasFree fees'} value={usdt(fees)} tone="ok" />
+          <Stat label="Families receive" value="100%" tone="ok" />
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted">
+          5.15% is the average cost of sending money from Korea to Vietnam through banks and remittance firms. GasFree charges a flat {usdt(GASFREE_FEE)} USDT per transfer from the sender’s account (a new account also pays 1.00 USDT once to activate), so each family gets the full amount and needs no TRX. The flat fee is cheaper for any transfer above {usdt(breakEven)} USDT; on a 300 USDT transfer a bank takes {usdt(300_000_000 * BANK_FEE_RATE)} USDT.
+        </p>
+      </div>
+    </Card>
   );
 }
 
@@ -210,10 +319,11 @@ export default function BatchPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         {review && <Button kind="secondary" busy={busy === 'review'} disabled={!flagged} onClick={() => act('review')}>Explain {flagged} flagged rows with AI ↗</Button>}
+        {review && <Button kind="quiet" busy={busy === 'recheck'} onClick={() => act('recheck')}>Run checks again</Button>}
         {batch.status !== 'CLOSED' && <Button kind="secondary" busy={busy === 'precheck'} onClick={() => act<Precheck>('precheck', {}, setPre)}>Pre-check balance and fees</Button>}
         {(review || batch.status === 'PAUSED') && !live && (
-          <Button kind="primary" busy={busy === 'run'} disabled={summary.ready + summary.awaiting === 0} onClick={() => act('run')}>
-            Pay {summary.ready + summary.awaiting} approved rows →
+          <Button kind="primary" busy={busy === 'run'} disabled={summary.ready + summary.awaiting === 0 || !!view.approvalProblem} title={view.approvalProblem ?? undefined} onClick={() => act('run')}>
+            Pay {summary.ready + summary.awaiting} rows →
           </Button>
         )}
         {batch.status === 'PAUSED' && !live && <Button kind="secondary" busy={busy === 'recover'} onClick={() => act('recover')}>Recover unknown payments</Button>}
@@ -242,6 +352,9 @@ export default function BatchPage() {
           <a href={`/api/batches/${batch.id}/export`} className={LINK_BUTTON}>Export evidence ↓</a>
         </span>
       </div>
+
+      <OwnerApproval view={view} reload={load} />
+      <Savings view={view} />
 
       {pre && <Card eyebrow="GasFree account" title="Pre-check" action={<button type="button" className="text-xs text-celadon hover:underline" onClick={() => setPre(null)}>Hide</button>}><PrecheckPanel p={pre} /></Card>}
 

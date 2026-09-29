@@ -3,23 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, usdt, when, FLAGS, REASONS, type BatchItem, type Policy, type Status } from './lib';
-import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink } from './ui';
+import { api, usdt, when, signWithTronLink, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft } from '../lib';
+import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink } from '../ui';
 
-type Draft = { id: number; domain: object; types: object; value: Record<string, string> };
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function signWithTronLink(draft: Draft) {
-  const w = window as any;
-  if (!w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
-  if (w.tronLink?.request) await w.tronLink.request({ method: 'tron_requestAccounts' });
-  const tronWeb = w.tronLink?.tronWeb || w.tronWeb;
-  const owner: string | undefined = tronWeb?.defaultAddress?.base58;
-  if (!owner) throw new Error('Unlock TronLink and connect an account first.');
-  const sign = tronWeb.trx.signTypedData ?? tronWeb.trx._signTypedData;
-  const signature: string = await sign.call(tronWeb.trx, draft.domain, draft.types, draft.value);
-  return { owner, signature };
-}
+type Draft = TypedDraft & { id: number };
 
 function Hero() {
   return (
@@ -49,6 +36,7 @@ function Modebar({ s }: { s: Status }) {
     { ok: s.kiln, label: 'Kiln AI', hint: 'add KILN_BASE_URL and KILN_API_KEY' },
     { ok: !!s.registry, label: 'Registry', hint: 'run npm run deploy:contracts' },
     { ok: s.notary, label: 'Notary', hint: 'run npm run setup' },
+    { ok: s.telegram, label: 'Telegram alerts', hint: 'optional, add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID' },
   ];
   return (
     <section className="mb-[18px] flex flex-col gap-3 rounded-lg border border-line bg-[#151d18] px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
@@ -65,6 +53,7 @@ function Modebar({ s }: { s: Status }) {
           </span>
         ))}
         {s.simulateLostLine && <span className="text-warn">Demo: line {s.simulateLostLine} response dropped</span>}
+        {s.telegram && <TestAlert />}
       </div>
     </section>
   );
@@ -73,6 +62,16 @@ function Modebar({ s }: { s: Status }) {
 type DeskProps = { status: Status; policy: Policy | null; committed: number; reload: () => void };
 
 // Step 1 picks who may be paid; step 2 signs the limits for exactly that selection.
+function TestAlert() {
+  const [note, setNote] = useState<string | null>(null);
+  const send = () => api('/api/alerts/test', { json: {} }).then(() => setNote('Sent')).catch((e) => setNote(e.message));
+  return (
+    <button type="button" onClick={send} className="text-celadon underline-offset-2 hover:underline">
+      {note ?? 'Send a test alert'}
+    </button>
+  );
+}
+
 function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
   const signed: string[] = policy ? JSON.parse(policy.payees) : [];
   const active = policy?.status === 'ACTIVE';
@@ -80,7 +79,7 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
   const changes = active ? [...new Set([...selected, ...signed])].filter((a) => selected.includes(a) !== signed.includes(a)).length : 0;
   return (
     <div className="grid min-w-0 gap-[18px]">
-      <Contacts payees={status.payees} signed={active ? signed : []} selected={selected} setSelected={setSelected} reload={reload} />
+      <Contacts payees={status.payees} rules={status.rules} signed={active ? signed : []} selected={selected} setSelected={setSelected} reload={reload} />
       <Limits status={status} policy={policy} committed={committed} reload={reload} selected={selected} changes={changes} />
     </div>
   );
@@ -88,12 +87,13 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
 
 const EMPTY_CONTACT = { name: '', country: '', address: '', usual: '' };
 
-function Contacts({ payees, signed, selected, setSelected, reload }: {
-  payees: Status['payees']; signed: string[]; selected: string[];
+function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
+  payees: Status['payees']; rules: Rules; signed: string[]; selected: string[];
   setSelected: React.Dispatch<React.SetStateAction<string[]>>; reload: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(EMPTY_CONTACT);
+  const [now] = useState(() => Date.now() / 1000);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const field = (k: keyof typeof EMPTY_CONTACT) => ({ value: form[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })) });
@@ -168,6 +168,7 @@ function Contacts({ payees, signed, selected, setSelected, reload }: {
               const on = selected.includes(p.address);
               const was = signed.includes(p.address);
               const tag = on && was ? ['SIGNED', 'text-celadon'] : on && signed.length ? ['TO ADD', 'text-warn'] : was ? ['TO REMOVE', 'text-warn'] : null;
+              const payableFrom = p.created_at ? p.created_at + rules.contactWaitHours * 3600 : 0;
               return (
                 <li key={p.address} className={`flex items-center gap-3 rounded-[7px] border px-3 py-2.5 transition ${on ? 'border-[#3f5a3d] bg-celadon-soft' : 'border-line'}`}>
                   <input
@@ -179,7 +180,11 @@ function Contacts({ payees, signed, selected, setSelected, reload }: {
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#38493b] text-xs text-celadon">{p.name[0]}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px]">{p.name} <span className="text-[11px] text-muted">{p.country}</span></span>
-                    <span className="flex flex-wrap items-center gap-x-2"><Addr a={p.address} /><span className="num font-mono text-[10px] text-muted">usual {p.usual.toFixed(2)}</span></span>
+                    <span className="flex flex-wrap items-center gap-x-2">
+                      <Addr a={p.address} />
+                      <span className="num font-mono text-[10px] text-muted">usual {p.usual.toFixed(2)} · 30 days {usdt(p.month)}</span>
+                    </span>
+                    {payableFrom > now && <span className="block text-[11px] text-warn">New contact: can be paid from {when(payableFrom)}</span>}
                   </span>
                   {tag && <span className={`font-mono text-[9px] tracking-[0.08em] whitespace-nowrap ${tag[1]}`}>{tag[0]}</span>}
                   <button
@@ -198,7 +203,9 @@ function Contacts({ payees, signed, selected, setSelected, reload }: {
           </ul>
         )}
         {orphans.length > 0 && <p className="text-[11px] text-warn">{orphans.length === 1 ? '1 removed contact is' : `${orphans.length} removed contacts are`} still allowed by the signed limits until the owner signs new ones.</p>}
-        <p className="text-[11px] text-muted">Ticked contacts are the only wallets the next signed limits allow. Adding or removing a contact is written to the log.</p>
+        <p className="text-[11px] text-muted">
+          Ticked contacts are the only wallets the next signed limits allow. A new contact can be paid only after {rules.contactWaitHours} hours, like a bank’s delayed transfer (지연이체). Adding or removing a contact is written to the log.
+        </p>
       </div>
     </Card>
   );
@@ -208,6 +215,7 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
   const [editing, setEditing] = useState(false);
   const [budget, setBudget] = useState('30');
   const [cap, setCap] = useState('15');
+  const [monthly, setMonthly] = useState('30');
   const [deadline, setDeadline] = useState(() => {
     const d = new Date(Date.now() + 8 * 3600_000);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -220,6 +228,7 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
     if (policy) {
       setBudget(String(policy.budget / 1e6));
       setCap(String(policy.per_payment / 1e6));
+      setMonthly(String((policy.per_payee_monthly ?? 0) / 1e6));
     }
     setEditing(true);
   };
@@ -228,9 +237,9 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
     setBusy(how);
     setError(null);
     try {
-      const w = window as any;
+      const w = window as unknown as { tronLink?: unknown; tronWeb?: unknown };
       if (how === 'tronlink' && !w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
-      const draft = await api<Draft>('/api/policy/draft', { json: { budget: Number(budget), perPayment: Number(cap), deadline: Math.floor(new Date(deadline).getTime() / 1000), payees: selected } });
+      const draft = await api<Draft>('/api/policy/draft', { json: { budget: Number(budget), perPayment: Number(cap), perPayeeMonthly: Number(monthly || 0), deadline: Math.floor(new Date(deadline).getTime() / 1000), payees: selected } });
       const body = how === 'server' ? { id: draft.id, serverSign: true } : { id: draft.id, ...(await signWithTronLink(draft)) };
       await api('/api/policy/activate', { json: body });
       setEditing(false);
@@ -297,8 +306,9 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
                 <span className="num">{usdt(Math.max(0, policy.budget - committed))} LEFT</span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-4">
               <Stat label="Cap per payment" value={usdt(policy.per_payment)} />
+              <Stat label="Per contact, 30 days" value={policy.per_payee_monthly ? usdt(policy.per_payee_monthly) : 'No cap'} />
               <Stat label="Deadline" value={<span className="text-base">{when(policy.deadline)}</span>} />
               <Stat label="Contacts allowed" value={signed.length} />
             </div>
@@ -312,12 +322,15 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
         {!policy && !editing && <Callout>No limits signed yet. Tick who can be paid in the contacts above, then set a budget that includes fees, a cap per payment and a deadline. Ansim cannot pay anything outside them.</Callout>}
         {editing && (
           <form className="grid gap-4" onSubmit={(e) => e.preventDefault()}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
               <label className="grid gap-2 text-[11px] text-muted">Budget in USDT, fees included
                 <input id="budget" type="number" min="0" step="0.01" value={budget} onChange={(e) => setBudget(e.target.value)} className="num px-3 py-2.5 font-mono text-sm" />
               </label>
               <label className="grid gap-2 text-[11px] text-muted">Cap per payment
                 <input id="cap" type="number" min="0" step="0.01" value={cap} onChange={(e) => setCap(e.target.value)} className="num px-3 py-2.5 font-mono text-sm" />
+              </label>
+              <label className="grid gap-2 text-[11px] text-muted">Per contact, 30 days (0 = no cap)
+                <input id="monthly" type="number" min="0" step="0.01" value={monthly} onChange={(e) => setMonthly(e.target.value)} className="num px-3 py-2.5 font-mono text-sm" />
               </label>
               <label className="grid gap-2 text-[11px] text-muted">Deadline
                 <input id="deadline" type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="px-3 py-2.5 text-sm" />
@@ -398,6 +411,7 @@ const GATE: [string, string][] = [
   ['The policy deadline has not passed', 'DEADLINE_PASSED'],
   ['The payee is on the signed list', 'PAYEE_NOT_ALLOWED'],
   ['The amount is within the cap per payment', 'OVER_PER_PAYMENT_CAP'],
+  ['The contact stays under its 30-day cap', 'OVER_MONTHLY_PAYEE_CAP'],
   ['Paid, in flight and fees stay inside the budget', 'OVER_BUDGET_WITH_FEES'],
 ];
 
