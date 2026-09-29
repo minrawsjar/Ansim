@@ -8,7 +8,7 @@ import { screen, contactProblem, walletRisk, BLOCKING, type Payee, type ScreenRo
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
 import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, usdtBalance, walletFacts, vaultInfo, vaultState, vaultReleased, vaultRelease, vaultSetFrozen, NILE_USDT } from './tron';
 import { gasfree, gasfreeConfig, signPermit } from './gasfree';
-import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning } from './orchestrator';
+import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning, committed as committedFor } from './orchestrator';
 import { telegramConfigured } from './alerts';
 
 const dataFile = (name: string) => new URL(`../data/${name}`, import.meta.url);
@@ -269,6 +269,64 @@ export async function editRow(rowId: number, patch: { receiver?: string; amount?
     logEvent('APPROVAL_CLEARED', { reason: `Line ${row.line} changed after the owner approved` }, row.batch_id);
   }
   return after;
+}
+
+/* ---------------- payout agent ---------------- */
+
+type Plan = { rows?: { address?: string; amount?: number | string; note?: string; why_ko?: string; why_en?: string }[]; summary?: { ko: string; en: string } };
+
+// The owner describes today's payouts in words; the model proposes rows from the contacts. Code keeps only
+// rows to real contacts with valid amounts, then the batch goes through the same checks, owner approval,
+// vault release and policy gate as an imported file. The model never signs or pays anything.
+export async function planBatch(instruction: string) {
+  if (!kilnConfigured()) throw new Error('The payout agent needs an AI model. Set KILN_BASE_URL and KILN_API_KEY (Kiln or any OpenAI-compatible API).');
+  const text = instruction.trim().slice(0, 500);
+  if (text.length < 5) throw new Error('Describe the payouts you want, for example “pay everyone their usual amount”.');
+  const policy = activePolicy();
+  const allowed: string[] = policy?.status === 'ACTIVE' ? JSON.parse(policy.payees) : [];
+  const rules = screenRules();
+  const contacts = payeeBook();
+  const lastSender = db.prepare("SELECT sender FROM rows WHERE receiver = ? AND sender IS NOT NULL AND sender != '' ORDER BY id DESC LIMIT 1");
+  const input = {
+    today: new Date().toISOString().slice(0, 10),
+    instruction: text,
+    limits: policy?.status === 'ACTIVE'
+      ? { remainingBudgetUSDT: (policy.budget - committedFor(policy.id)) / 1e6, capPerPaymentUSDT: policy.per_payment / 1e6, capPerContact30dUSDT: policy.per_payee_monthly ? policy.per_payee_monthly / 1e6 : null, deadline: new Date(policy.deadline * 1000).toISOString() }
+      : null,
+    contacts: contacts.map((c) => ({
+      name: c.name, country: c.country, address: c.address, usualUSDT: c.usual, last30dUSDT: payeeMonth(c.address) / 1e6,
+      isNew: !!c.created_at && nowSec() - c.created_at < rules.waitSec, walletRisk: c.risk?.level ?? 'unchecked', allowedByLimits: allowed.includes(c.address),
+    })),
+  };
+  const plan = await ask<Plan>('plan', PROMPTS.plan, input, { maxTokens: 1500 });
+  const book = new Map(contacts.map((c) => [c.address, c]));
+  const kept: { address: string; amount: number; note: string; why: { ko: string; en: string } }[] = [];
+  const dropped: { address: string | null; reason: string }[] = [];
+  for (const r of plan?.rows ?? []) {
+    const address = String(r.address ?? '').trim();
+    const amount = Math.round(Number(r.amount) * 1e6);
+    if (!book.has(address)) dropped.push({ address: address || null, reason: 'not a contact' });
+    else if (!(amount > 0)) dropped.push({ address, reason: 'not a positive amount' });
+    else if (kept.some((k) => k.address === address)) dropped.push({ address, reason: 'second payment to the same contact' });
+    else kept.push({ address, amount, note: String(r.note ?? '').slice(0, 80), why: { ko: String(r.why_ko ?? ''), en: String(r.why_en ?? '') } });
+  }
+  if (!kept.length) throw new Error(plan?.summary?.en ? `The agent proposed no payments: ${plan.summary.en}` : 'The agent proposed no payments.');
+
+  const b = db.prepare('INSERT INTO batches (source, columns, mapped_by, created_at) VALUES (?, ?, ?, ?)').run(`Agent plan: “${text.slice(0, 60)}”`, '{}', 'agent', nowSec());
+  const batchId = Number(b.lastInsertRowid);
+  const ins = db.prepare(
+    'INSERT INTO rows (batch_id, line, sender, name, receiver, amount, amount_raw, note, decision, agent, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  db.transaction(() => {
+    kept.forEach((k, i) => {
+      const sender = (lastSender.get(k.address) as { sender: string } | undefined)?.sender ?? 'Ansim agent';
+      ins.run(batchId, i + 2, sender, book.get(k.address)!.name, k.address, k.amount, String(k.amount / 1e6), k.note, 'pay', JSON.stringify({ ...k.why, action: 'pay' }), Date.now());
+    });
+  })();
+  await rescreen(batchId);
+  for (const r of batchRows(batchId)) if (JSON.parse(r.flags).length) updateRow(r.id, { decision: 'hold' });
+  logEvent('AGENT_PLANNED', { instruction: text, model: MODEL, proposed: kept.length, dropped, summary: plan?.summary ?? null }, batchId);
+  return { id: batchId, summary: plan?.summary ?? null, dropped };
 }
 
 // Runs every check again, for example after a new contact's waiting period has passed.

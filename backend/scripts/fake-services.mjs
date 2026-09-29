@@ -51,6 +51,9 @@ async function fakeKiln(req, res) {
     out = { receiver: pick(/지갑|wallet|address/i), amount: pick(/금액|amount/i), sender: pick(/송금인|sender/i), name: input.header.find((h) => /수취인|recipient/i.test(h) && !/지갑/.test(h)) ?? null, note: pick(/비고|note/i) };
   } else if (system.includes('check a USDT payout batch')) {
     out = { rows: input.rows.map((r) => ({ line: r.line, ko: `[fake] ${r.flags.join(', ')} 확인이 필요합니다.`, en: `[fake] Check ${r.flags.join(', ')}.`, action: r.flags.includes('UNUSUAL_AMOUNT') && r.flags.length === 1 ? 'pay' : 'hold' })) };
+  } else if (system.includes('payout agent')) {
+    const pick = input.contacts.filter((c) => c.allowedByLimits && !c.isNew);
+    out = { rows: pick.map((c) => ({ address: c.address, amount: c.usualUSDT, note: '[fake] monthly support', why_ko: `[fake] ${c.name}님의 평소 금액`, why_en: `[fake] ${c.name}'s usual amount` })), summary: { ko: `[fake] ${pick.length}명에게 평소 금액을 보냅니다.`, en: `[fake] Paying ${pick.length} contacts their usual amount.` } };
   } else if (system.includes('judge a recipient wallet')) {
     out = input.flags.length ? { ko: `[fake] 위험 신호: ${input.flags.join(', ')}`, en: `[fake] Risk signals: ${input.flags.join(', ')}.` } : { ko: '[fake] 공개 기록에서 위험 신호가 없습니다.', en: '[fake] No risk signals in the public record.' };
   } else if (system.includes('answer a customer')) {

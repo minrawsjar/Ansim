@@ -11,7 +11,7 @@ const LINK_BUTTON = 'inline-flex items-center rounded-[7px] border border-line p
 const STATUS_WORD: Record<string, string> = { REVIEW: 'in review', PAUSED: 'paused', CLOSED: 'closed', RUNNING: 'paying' };
 const EVENT_TONE = (t: string) => (/REFUSED|FAILED|STOP|REJECT|FROZEN/.test(t) ? 'text-stop' : /SUCCEED|SEALED|CLOSED|CONFIRMED|APPROVED|RELEASED|FUNDED/.test(t) ? 'text-celadon' : 'text-ink');
 
-const MAPPED_BY: Record<string, string> = { kiln: 'Columns mapped by Kiln (gpt-oss-120b)', cache: 'Columns mapped from cache (0 tokens)', rules: 'Columns mapped by header rules' };
+const MAPPED_BY: Record<string, string> = { kiln: 'Columns mapped by the AI model', cache: 'Columns mapped from cache (0 tokens)', rules: 'Columns mapped by header rules', agent: 'Drafted by the payout agent' };
 
 function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean; onSaved: () => void; setError: (e: string | null) => void }) {
   const [edit, setEdit] = useState(false);
@@ -334,6 +334,21 @@ export default function BatchPage() {
       </div>
 
       <ErrorLine error={error} />
+      {(() => {
+        const planned = events.find((e) => e.type === 'AGENT_PLANNED');
+        const summary = planned?.data.summary as { ko: string; en: string } | null | undefined;
+        const dropped = (planned?.data.dropped as unknown[] | undefined)?.length ?? 0;
+        return planned ? (
+          <Callout>
+            <span className="grid gap-1">
+              <span className="font-mono text-[10px] tracking-[0.1em] text-muted uppercase">The agent’s plan for “{String(planned.data.instruction)}”</span>
+              {summary && <span>{summary.ko}</span>}
+              {summary && <span className="text-muted">{summary.en}</span>}
+              {dropped > 0 && <span className="text-warn">Code dropped {dropped} proposed {dropped === 1 ? 'row' : 'rows'} that were not valid payments to contacts.</span>}
+            </span>
+          </Callout>
+        ) : null;
+      })()}
 
       <div className="flex flex-wrap items-center gap-2">
         {review && <Button kind="secondary" busy={busy === 'review'} disabled={!flagged} onClick={() => act('review')}>Explain {flagged} flagged rows with AI ↗</Button>}

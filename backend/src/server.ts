@@ -14,7 +14,7 @@ import {
   draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
   familyReceipt, findPayments, askDispute,
-  vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments,
+  vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments, planBatch,
 } from './desk';
 
 const app = new Hono().basePath('/api');
@@ -157,6 +157,7 @@ app.get('/chain/:txid', async (c) => {
 
 app.get('/vault', async (c) => c.json(await vaultView()));
 app.get('/payments/recent', (c) => c.json(recentPayments()));
+app.post('/agent/plan', async (c) => c.json(await planBatch(String((await c.req.json()).instruction ?? ''))));
 app.post('/vault/freeze', async (c) => {
   const { frozen, txid } = await c.req.json();
   return c.json(txid ? await noteVaultFreeze(String(txid)) : await freezeVault(!!frozen));

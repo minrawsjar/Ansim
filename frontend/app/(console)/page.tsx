@@ -387,6 +387,38 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
   );
 }
 
+// The owner says what to pay in plain words; the agent drafts a batch from the contacts. The batch still
+// goes through every check, the owner's approval and the vault before anything moves.
+function AgentCard() {
+  const router = useRouter();
+  const [instruction, setInstruction] = useState('Pay everyone their usual monthly support. Skip anyone new or with a risky wallet.');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const plan = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ id: number }>('/api/agent/plan', { json: { instruction } });
+      router.push(`/batch/${r.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Card eyebrow="Step 3 · ask the agent" title="Payout agent">
+      <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); plan(); }}>
+        <ErrorLine error={error} />
+        <textarea id="agent-instruction" rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} className="px-3 py-2.5 text-[13px]" />
+        <Button kind="primary" type="submit" busy={busy} className="w-full">Draft a batch →</Button>
+        <p className="text-[11px] leading-relaxed text-muted">
+          The model proposes payments only to your contacts, with a reason for each. Code drops anything else, then runs every check. Nothing is paid until the owner approves and the vault releases the money.
+        </p>
+      </form>
+    </Card>
+  );
+}
+
 function ImportCard() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -409,7 +441,7 @@ function ImportCard() {
     }
   };
   return (
-    <Card eyebrow="Step 3 · today’s file" title="Import and screen" action={<Counter n={Object.keys(FLAGS).length} />}>
+    <Card eyebrow="Or import today’s file" title="Import and screen" action={<Counter n={Object.keys(FLAGS).length} />}>
       <div className="grid gap-4">
         <ErrorLine error={error} />
         <input id="payout-file" type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="w-full min-w-0 text-xs text-muted file:mr-3 file:rounded-[7px] file:border file:border-edge file:bg-raised file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#d4e6cd]" />
@@ -631,7 +663,10 @@ export default function Console() {
         <>
           <div className="grid items-start gap-[18px] lg:grid-cols-[minmax(0,1.8fr)_minmax(315px,1fr)]">
             <PolicyDesk status={status} policy={policy.policy} committed={policy.committed} reload={load} />
-            <ImportCard />
+            <div className="grid min-w-0 gap-[18px]">
+              <AgentCard />
+              <ImportCard />
+            </div>
           </div>
           <div className="mt-[18px] grid items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <VaultCard />
