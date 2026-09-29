@@ -345,7 +345,8 @@ export default function BatchPage() {
         const planned = events.find((e) => e.type === 'AGENT_PLANNED');
         const summary = planned?.data.summary as { ko: string; en: string } | null | undefined;
         const dropped = (planned?.data.dropped as unknown[] | undefined)?.length ?? 0;
-        return planned ? (
+        // The model's summary describes the draft ("not yet approved"), so it is only shown while the batch is in review.
+        return planned && review ? (
           <Callout>
             <span className="grid gap-1">
               <span className="font-mono text-[10px] tracking-[0.1em] text-muted uppercase">The agent’s plan for “{String(planned.data.instruction)}”</span>
@@ -386,12 +387,18 @@ export default function BatchPage() {
             Stop all payments
           </Button>
         )}
-        {batch.status === 'CLOSED' && <Button kind="secondary" busy={busy === 'receipt'} onClick={() => act('receipt')}>Write receipt with AI ↗</Button>}
+        {batch.status === 'CLOSED' && <Button kind="secondary" busy={busy === 'receipt'} onClick={() => act('receipt')}>{batch.receipt ? 'Rewrite receipt with AI' : 'Write receipt with AI'}</Button>}
         <span className="flex gap-2 sm:ml-auto">
           <a href={`/api/batches/${batch.id}/export?format=csv`} className={LINK_BUTTON}>Export CSV ↓</a>
           <a href={`/api/batches/${batch.id}/export`} className={LINK_BUTTON}>Export evidence ↓</a>
         </span>
       </div>
+
+      {batch.receipt && (
+        <Card eyebrow="Written by AI · Korean and English" title="Receipt for the owner" action={<Copy text={`${batch.receipt.ko}\n\n${batch.receipt.en}`} />}>
+          <div className="grid gap-2 text-[13px] leading-relaxed"><p>{batch.receipt.ko}</p><p className="text-muted">{batch.receipt.en}</p></div>
+        </Card>
+      )}
 
       <div className="grid items-start gap-[18px] lg:grid-cols-2">
         <div className="grid min-w-0 gap-[18px]">
@@ -425,12 +432,6 @@ export default function BatchPage() {
         </div>
       </Card>
 
-      {batch.receipt && (
-        <Card eyebrow="Written by Kiln" title="Receipt for the owner">
-          <div className="grid gap-2 text-[13px] leading-relaxed"><p>{batch.receipt.ko}</p><p className="text-muted">{batch.receipt.en}</p></div>
-        </Card>
-      )}
-
       <div className="grid items-start gap-[18px] lg:grid-cols-2">
         <Card
           eyebrow="Anyone can check"
@@ -452,7 +453,7 @@ export default function BatchPage() {
             )}
           </div>
         </Card>
-        <Card eyebrow="Kiln · gpt-oss-120b" title="Ask the auditor AI">
+        <Card eyebrow="AI · answers cite the log" title="Ask the auditor AI">
           <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); act<{ answer: string }>('ask', { question }, (r) => setAnswer(r.answer)); }}>
             <textarea id="question" rows={2} value={question} onChange={(e) => setQuestion(e.target.value)} className="px-3 py-2.5 text-[13px]" />
             <div><Button kind="primary" busy={busy === 'ask'} type="submit">Ask →</Button></div>
