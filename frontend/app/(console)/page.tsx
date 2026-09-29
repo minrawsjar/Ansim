@@ -82,10 +82,13 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
     active ? signed.filter((a) => status.payees.some((p) => p.address === a)) : status.payees.map((p) => p.address),
   );
   const changes = active ? [...new Set([...selected, ...signed])].filter((a) => selected.includes(a) !== signed.includes(a)).length : 0;
+  // Every signed wallet was removed from the contacts: the limits would refuse every payment.
+  const coversNone = active && !status.payees.some((p) => signed.includes(p.address));
+  const selectAll = () => setSelected(status.payees.map((p) => p.address));
   return (
     <div className="grid min-w-0 gap-[18px]">
       <Contacts payees={status.payees} rules={status.rules} signed={active ? signed : []} selected={selected} setSelected={setSelected} reload={reload} />
-      <Limits status={status} policy={policy} committed={committed} reload={reload} selected={selected} changes={changes} />
+      <Limits status={status} policy={policy} committed={committed} reload={reload} selected={selected} changes={changes} coversNone={coversNone} selectAll={selectAll} />
     </div>
   );
 }
@@ -280,7 +283,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
   );
 }
 
-function Limits({ status, policy, committed, reload, selected, changes }: DeskProps & { selected: string[]; changes: number }) {
+function Limits({ status, policy, committed, reload, selected, changes, coversNone, selectAll }: DeskProps & { selected: string[]; changes: number; coversNone: boolean; selectAll: () => void }) {
   const [editing, setEditing] = useState(false);
   const [budget, setBudget] = useState('30');
   const [cap, setCap] = useState('15');
@@ -294,6 +297,8 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
   const [error, setError] = useState<string | null>(null);
 
   const edit = () => {
+    // Nothing ticked yet: start from every current contact, so one click leads to a form ready to sign.
+    if (!status.payees.some((p) => selected.includes(p.address))) selectAll();
     if (policy) {
       setBudget(String(policy.budget / 1e6));
       setCap(String(policy.per_payment / 1e6));
@@ -350,7 +355,13 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
     >
       <div className="grid gap-5">
         <ErrorLine error={error} />
-        {changes > 0 && !editing && (
+        {coversNone && !editing && (
+          <Callout tone="warn">
+            The signed limits cover none of your current contacts, so every payment would be refused.{' '}
+            <button type="button" onClick={edit} className="font-semibold underline">Sign new limits for your contacts</button>
+          </Callout>
+        )}
+        {changes > 0 && !coversNone && !editing && (
           <Callout tone="warn">
             {changes === 1 ? '1 contact change is' : `${changes} contact changes are`} not signed yet. Payments still follow the signed list until the owner signs new limits.{' '}
             <button type="button" onClick={edit} className="font-semibold underline">Sign new limits</button>
