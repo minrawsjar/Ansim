@@ -14,7 +14,7 @@ export type BatchItem = { id: number; source: string; status: string; mapped_by:
 export type Row = {
   id: number; line: number; sender: string | null; name: string | null; receiver: string; amount: number | null;
   amount_raw: string | null; note: string | null; flags: string[]; agent: { ko: string; en: string; action: string } | null;
-  decision: 'pay' | 'hold' | 'remove'; state: string; reason: string | null; trace_id: string | null;
+  decision: 'pay' | 'hold' | 'remove'; state: string; reason: string | null; request_id: string | null; trace_id: string | null;
   txn_hash: string | null; fee: number | null; max_fee: number | null; error: string | null;
 };
 export type Summary = { total: number; paid: number; failed: number; refused: number; held: number; ready: number; awaiting: number; amountPaid: number; fees: number };

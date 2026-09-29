@@ -87,6 +87,7 @@ function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean
           {r.decision === 'pay' ? <StatePill state={r.state} /> : <span className="text-xs text-muted">Not paid</span>}
           {r.reason && <span className="text-xs text-stop">{REASONS[r.reason] ?? r.reason}</span>}
           <TxLink hash={r.txn_hash} />
+          {r.request_id && <span title={`Request ${r.request_id}${r.trace_id ? `\nGasFree trace ${r.trace_id}` : ''}`} className="font-mono text-[11px] text-muted">req {r.request_id.slice(0, 8)}</span>}
           {r.fee != null && <span className="num font-mono text-[11px] text-muted">fee {usdt(r.fee)}</span>}
           {r.error && r.state !== 'SUCCEED' && <span className="max-w-48 text-[11px] break-words text-warn">{r.error}</span>}
         </div>
