@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, usdt, when, waitText, signWithTronLink, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft } from '../lib';
-import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink } from '../ui';
+import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink, WaitingForTronLink } from '../ui';
 
 type Draft = TypedDraft & { id: number };
 
@@ -347,6 +347,7 @@ function Limits({ status, policy, committed, reload, selected, changes }: DeskPr
               {status.ownerFallback && <Button kind="secondary" type="button" disabled={!names.length} busy={busy === 'server'} onClick={() => grant('server')}>Sign with demo owner key</Button>}
               <Button kind="quiet" type="button" onClick={() => setEditing(false)}>Cancel</Button>
             </div>
+            {busy === 'tronlink' && <WaitingForTronLink />}
             <Callout>Signing new limits replaces the current ones. The signature is TIP-712 typed data, checked by the backend and again by the auditor script.</Callout>
           </form>
         )}

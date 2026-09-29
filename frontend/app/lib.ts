@@ -65,6 +65,10 @@ export const BANK_FEE_RATE = 0.0515;
 // GasFree's Nile transfer fee when this was built. The pre-check shows the live value.
 export const GASFREE_FEE = 300_000;
 
+// Rejects if the wallet does not answer in time, so a stuck request cannot spin forever.
+const within = <T,>(p: Promise<T> | undefined, ms: number) =>
+  Promise.race([p ?? Promise.resolve(undefined as T), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('TronLink did not answer')), ms))]);
+
 // Nile testnet, the chainId inside every Ansim signature (3448148188). TronLink refuses to sign
 // typed data for a chain other than the one it is connected to.
 const NILE_CHAIN_ID = '0xcd8690dc';
@@ -76,10 +80,13 @@ export async function signWithTronLink(draft: TypedDraft) {
   if (!w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
   if (w.tronLink?.request) await w.tronLink.request({ method: 'tron_requestAccounts' });
   let tronWeb = w.tronLink?.tronWeb || w.tronWeb;
-  if (!/nile/i.test(tronWeb?.fullNode?.host ?? '')) {
+  // TRON's chain id is the last 4 bytes of the genesis block hash, so ask the wallet's own node.
+  const genesis = await within<{ blockID?: string }>(tronWeb.trx.getBlockByNumber(0), 10_000).catch(() => null);
+  const chain = genesis?.blockID ? '0x' + String(genesis.blockID).slice(-8) : null;
+  if (chain && chain !== NILE_CHAIN_ID) {
     // Ask TronLink to switch to Nile. Older versions lack this request; signing then fails with the message below.
     const provider = w.tron ?? w.tronLink;
-    await provider?.request?.({ method: 'wallet_switchEthereumChain', params: [{ chainId: NILE_CHAIN_ID }] }).catch(() => {});
+    await within(provider?.request?.({ method: 'wallet_switchEthereumChain', params: [{ chainId: NILE_CHAIN_ID }] }), 60_000).catch(() => {});
     tronWeb = w.tronLink?.tronWeb || w.tronWeb;
   }
   const owner: string | undefined = tronWeb?.defaultAddress?.base58;

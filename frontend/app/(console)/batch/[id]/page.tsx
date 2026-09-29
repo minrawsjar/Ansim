@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, usdt, when, signWithTronLink, BANK_FEE_RATE, GASFREE_FEE, FLAGS, REASONS, type BatchView, type Precheck, type Row, type TypedDraft } from '../../../lib';
-import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink } from '../../../ui';
+import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink, WaitingForTronLink } from '../../../ui';
 
 const LINK_BUTTON = 'inline-flex items-center rounded-[7px] border border-line px-3.5 py-2.5 text-xs font-semibold text-[#c8d1c7] transition hover:bg-raised';
 const STATUS_WORD: Record<string, string> = { REVIEW: 'in review', PAUSED: 'paused', CLOSED: 'closed', RUNNING: 'paying' };
@@ -164,6 +164,7 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
     >
       <div className="grid gap-3">
         <ErrorLine error={error} />
+        {busy === 'tronlink' && <WaitingForTronLink />}
         {approved ? (
           <p className="text-[13px] text-muted">
             <Addr a={a!.owner} /> approved <b className="text-ink">{a!.value.count} payments, {usdt(Number(a!.value.total))} USDT</b> on {when(a!.at)}, {a!.signedBy === 'server-demo-key' ? 'with the demo owner key' : 'in TronLink'}. Changing any row clears this approval.

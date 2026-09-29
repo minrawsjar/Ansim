@@ -134,3 +134,12 @@ export function Stat({ label, value, tone }: { label: string; value: React.React
     </div>
   );
 }
+
+// Shown while TronLink waits for the owner. A TIP-712 signature is not a transaction, so TronLink's history stays empty.
+export function WaitingForTronLink() {
+  return (
+    <p className="text-[11px] leading-relaxed text-warn">
+      Confirm the signature in the TronLink window. If none opened, click the TronLink icon in the toolbar. This is a signature, not a transaction: it costs nothing and does not appear in TronLink’s history.
+    </p>
+  );
+}
