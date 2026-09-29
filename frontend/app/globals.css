@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Celadon accent on a green-tinted paper, matching the Ansim plan. */
+@theme {
+  --color-paper: #f3f6f5;
+  --color-surface: #ffffff;
+  --color-ink: #14201c;
+  --color-muted: #56675f;
+  --color-line: #d3ded9;
+  --color-celadon: #2b7a6a;
+  --color-celadon-soft: #ddede8;
+  --color-ok: #2b7a4b;
+  --color-warn: #9a6200;
+  --color-stop: #b02a21;
+  --font-sans: var(--font-plex), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
