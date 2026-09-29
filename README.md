@@ -71,7 +71,7 @@ npm run deploy:contracts   # deploys AnsimRegistry to Nile
 npm run dev                # backend on :4000, console on http://localhost:3000
 ```
 
-Open the console, press **Pre-check**, and send Nile test USDT to the GasFree address it shows. Import `backend/data/demo/ansim-demo-payouts.xlsx` to try the full flow.
+Open the console, press **Pre-check**, and send Nile test USDT to the GasFree address it shows. GasFree's Nile fees are 0.30 USDT per transfer plus 1.00 USDT once to activate the account, so about 50 test USDT covers all four demo runs. Import `backend/data/demo/ansim-demo-payouts.xlsx` to try the full flow.
 
 ```bash
 npm run check                               # unit tests for the policy gate, screening, parsing and log
