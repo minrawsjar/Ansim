@@ -1,4 +1,4 @@
-import { db, getBatch, getPolicy, getRow, batchRows, updateRow, nowSec, activePolicy, type Row } from './db';
+import { db, getBatch, getPolicy, getRow, batchRows, updateRow, nowSec, activePolicy, recordKey, type Row } from './db';
 import { logEvent } from './log';
 import { gasfree, gasfreeConfig, signPermit, GasFreeRejected, type Permit, type GasFreeTransfer } from './gasfree';
 import { refuseReason, MONTH_SEC } from './policy';
@@ -308,10 +308,12 @@ async function closeIfDone(batchId: number) {
   const { hash } = logEvent('BATCH_CLOSED', { policyId: batch.policy_id, ...summary }, batchId);
   db.prepare("UPDATE batches SET status = 'CLOSED', close_hash = ? WHERE id = ?").run(hash, batchId);
   try {
-    const txid = await recordBatchSeal({ batchId, policyId: batch.policy_id ?? 0, logHash: hash, ...summary });
+    const policy = batch.policy_id ? getPolicy(batch.policy_id) : undefined;
+    const key = recordKey(batchId);
+    const txid = await recordBatchSeal({ batchId: key, policyId: policy?.record_key ?? batch.policy_id ?? 0, logHash: hash, ...summary });
     if (txid) {
-      db.prepare('UPDATE batches SET anchor_tx = ? WHERE id = ?').run(txid, batchId);
-      logEvent('BATCH_SEALED', { txid, logHash: hash }, batchId);
+      db.prepare('UPDATE batches SET anchor_tx = ?, record_key = ? WHERE id = ?').run(txid, key, batchId);
+      logEvent('BATCH_SEALED', { txid, logHash: hash, recordKey: key }, batchId);
     } else {
       logEvent('SEAL_SKIPPED', { reason: 'Registry contract not deployed or NOTARY_PRIVATE_KEY missing' }, batchId);
     }

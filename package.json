@@ -8,6 +8,7 @@
     "deploy:contracts": "npm run deploy -w contracts",
     "verify": "npm run verify -w backend --",
     "reset": "npm run reset -w backend",
-    "check": "npm run check -w backend && npm run compile -w contracts"
+    "check": "npm run check -w backend && npm run compile -w contracts",
+    "deploy:vault": "npm run deploy:vault -w backend"
   }
 }

@@ -14,6 +14,7 @@ import {
   draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
   familyReceipt, findPayments, askDispute,
+  vaultView, freezeVault, noteVaultFreeze, returnToVault,
 } from './desk';
 
 const app = new Hono().basePath('/api');
@@ -152,6 +153,13 @@ app.get('/chain/:txid', async (c) => {
   if (!/^[0-9a-f]{64}$/i.test(txid)) throw new Error('Not a transaction hash.');
   return c.json(await usdtTransferProof(txid));
 });
+
+app.get('/vault', async (c) => c.json(await vaultView()));
+app.post('/vault/freeze', async (c) => {
+  const { frozen, txid } = await c.req.json();
+  return c.json(txid ? await noteVaultFreeze(String(txid)) : await freezeVault(!!frozen));
+});
+app.post('/vault/return', async (c) => c.json(await returnToVault()));
 
 app.post('/alerts/test', async (c) => {
   await sendTelegram('Ansim test alert. Refusals, stops, failures, new contacts and finished batches will arrive here.');

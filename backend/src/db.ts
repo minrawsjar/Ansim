@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS tokens (
   effort TEXT
 );
 CREATE TABLE IF NOT EXISTS column_maps (signature TEXT PRIMARY KEY, mapping TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS payees (
   address TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -85,6 +86,7 @@ export type Policy = {
   signature: string | null; signed_by: string | null; policy_hash: string | null; anchor_tx: string | null;
   status: 'DRAFT' | 'ACTIVE' | 'STOPPED' | 'REPLACED'; created_at: number;
   per_payee_monthly: number | null; // null on policies signed before the monthly cap existed
+  record_key: number | null;
 };
 
 export type Batch = {
@@ -92,6 +94,7 @@ export type Batch = {
   status: 'REVIEW' | 'RUNNING' | 'PAUSED' | 'CLOSED'; receipt: string | null;
   close_hash: string | null; anchor_tx: string | null; created_at: number;
   approval: string | null;
+  record_key: number | null;
 };
 
 export type Row = {
@@ -120,6 +123,8 @@ function open() {
   addColumn('batches', 'approval', 'TEXT');
   addColumn('rows', 'receipt_token', 'TEXT');
   addColumn('rows', 'travel', 'TEXT');
+  addColumn('policies', 'record_key', 'INTEGER');
+  addColumn('batches', 'record_key', 'INTEGER');
   return d;
 }
 
@@ -128,6 +133,17 @@ const g = globalThis as unknown as { __ansimDb?: Database.Database };
 export const db = (g.__ansimDb ??= open());
 
 export const nowSec = () => Math.floor(Date.now() / 1000);
+
+// The registry contract is shared, so each database writes its policies and batches under its own
+// random range: id 3 here becomes namespace × 1,000,000 + 3 on chain. Records made before this have no key.
+export function recordKey(id: number) {
+  let row = db.prepare("SELECT value FROM meta WHERE key = 'record_namespace'").get() as { value: string } | undefined;
+  if (!row) {
+    db.prepare("INSERT INTO meta (key, value) VALUES ('record_namespace', ?)").run(String(1 + Math.floor(Math.random() * 2 ** 31)));
+    row = db.prepare("SELECT value FROM meta WHERE key = 'record_namespace'").get() as { value: string };
+  }
+  return Number(row.value) * 1_000_000 + id;
+}
 
 export const getPolicy = (id: number) => db.prepare('SELECT * FROM policies WHERE id = ?').get(id) as Policy | undefined;
 export const activePolicy = () =>

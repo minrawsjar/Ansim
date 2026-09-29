@@ -4,7 +4,7 @@
 // Usage: node scripts/verify.mjs <ansim-evidence.json>
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { TronWeb } from 'tronweb';
+import { TronWeb, utils } from 'tronweb';
 
 const file = process.argv[2];
 if (!file) {
@@ -70,7 +70,7 @@ for (const p of ev.policies.filter((x) => usedPolicies.has(x.id))) {
   const logged = events.find((e) => e.type === 'POLICY_ACTIVATED' && e.data.policyId === p.id);
   check(h === p.policyHash && logged?.data.policyHash === h, `Policy ${p.id} hash matches the log`);
   if (registry && p.recordTx) {
-    const rec = await registry.policies(p.id).call();
+    const rec = await registry.policies(p.recordKey ?? p.id).call();
     check(hex(rec.policyHash ?? rec[0]) === h, `Policy ${p.id} hash is recorded in the registry contract`, p.recordTx);
   } else {
     info(`Policy ${p.id} was not recorded on chain`);
@@ -82,7 +82,7 @@ const closed = events.find((e) => e.type === 'BATCH_CLOSED' && e.batch === ev.ba
 if (closed) {
   check(closed.hash === ev.batch.closeHash, 'Batch closing hash matches the log');
   if (registry && ev.batch.sealTx) {
-    const seal = await registry.batches(ev.batch.id).call();
+    const seal = await registry.batches(ev.batch.recordKey ?? ev.batch.id).call();
     check(hex(seal.logHash ?? seal[0]) === closed.hash, 'Batch closing hash is sealed in the registry contract', ev.batch.sealTx);
   } else info('Batch was not sealed on chain');
 } else info('Batch is not closed yet');
@@ -111,7 +111,35 @@ else {
   check(rowsHash(pay) === a.rowsHash && pay.length === a.count, 'The rows marked to pay are exactly the rows the owner approved');
 }
 
-/* 5. Every payment matches its signed record, the chain and the policy. Every refusal was required. */
+/* 5. The vault released no more than the owner approved, and the chain agrees. */
+const e = utils.ethersUtils;
+const kec = (t) => e.keccak256(e.toUtf8Bytes(t));
+function e712digest(batchId, a) {
+  const abi = e.AbiCoder.defaultAbiCoder();
+  const p = policies.get(a.policyId);
+  const domain = e.keccak256(abi.encode(['bytes32', 'bytes32', 'bytes32', 'uint256'], [kec('EIP712Domain(string name,string version,uint256 chainId)'), kec(p?.domain.name ?? 'Ansim'), kec(p?.domain.version ?? '1'), p?.domain.chainId ?? 3448148188]));
+  const struct = e.keccak256(abi.encode(['bytes32', 'uint256', 'uint256', 'bytes32', 'uint256', 'uint256'], [kec('BatchApproval(uint256 batchId,uint256 policyId,bytes32 rowsHash,uint256 count,uint256 total)'), batchId, a.policyId, a.rowsHash, a.count, a.total]));
+  return e.keccak256(e.concat(['0x1901', domain, struct]));
+}
+const VAULT_ABI = [
+  { type: 'function', name: 'released', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'feePerPayment', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+];
+const release = events.find((e) => e.type === 'VAULT_RELEASED' && e.batch === ev.batch.id);
+if (ev.vault && release) {
+  const vault = tw.contract(VAULT_ABI, ev.vault.address);
+  const r = release.data;
+  // Releases are keyed by the TIP-712 digest of the approval, recomputed here from the logged approval.
+  const digest = approval ? e712digest(ev.batch.id, approval.data) : '0x' + '0'.repeat(64);
+  const onChain = BigInt(await vault.released(digest).call());
+  const fee = BigInt(await vault.feePerPayment().call());
+  check(onChain === BigInt(r.amount), 'The vault contract shows the same release for this batch', `${usdt(r.amount)} USDT, ${r.txid}`);
+  const a = approval?.data;
+  check(!!a && r.rowsHash === a.rowsHash && BigInt(r.amount) <= BigInt(a.total) + BigInt(a.count) * fee, 'The vault released only the approved total plus GasFree fees', a ? `${usdt(a.total)} + ${a.count} × ${usdt(fee)}` : 'no approval');
+  check(!firstSigned || release.id < firstSigned.id, 'The vault released the money before the first payment was signed');
+} else if (ev.vault) info('The vault has not released money for this batch');
+
+/* 6. Every payment matches its signed record, the chain and the policy. Every refusal was required. */
 function refuseReason(p, committed, to, value, maxFee, now, payeeMonth) {
   if (p.status === 'STOPPED') return 'STOPPED_BY_OWNER';
   if (p.status !== 'ACTIVE') return 'NO_ACTIVE_POLICY';

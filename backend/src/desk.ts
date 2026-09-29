@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import { randomInt, randomBytes } from 'node:crypto';
-import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, nowSec, type Row, type Batch } from './db';
+import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, nowSec, recordKey, type Row, type Batch } from './db';
 import { logEvent, allEvents, batchEvents } from './log';
 import { policyDomain, policyTypesFor, policyValue, policyHash, payeesHash, approvalTypes, approvalValue } from './policy';
 import { parseSheet, headerSignature, ruleMapping, validMapping, toRows, type Mapping } from './importer';
 import { screen, contactProblem, BLOCKING, type Payee, type ScreenRow } from './screen';
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
-import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, NILE_USDT } from './tron';
-import { payerAddress, summarize, msg, payeeMonth, startRun, isRunning } from './orchestrator';
+import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, usdtBalance, vaultInfo, vaultState, vaultReleased, vaultRelease, vaultSetFrozen, NILE_USDT } from './tron';
+import { gasfree, gasfreeConfig, signPermit } from './gasfree';
+import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning } from './orchestrator';
 import { telegramConfigured } from './alerts';
 
 const dataFile = (name: string) => new URL(`../data/${name}`, import.meta.url);
@@ -127,10 +128,11 @@ export async function activatePolicy(input: { id: number; signature?: string; ow
   db.prepare("UPDATE policies SET status = 'ACTIVE', owner = ?, signature = ?, signed_by = ?, policy_hash = ? WHERE id = ?").run(owner, signature, signedBy, hash, p.id);
   logEvent('POLICY_ACTIVATED', { policyId: p.id, policyHash: hash, owner, signedBy, payer: p.payer, budget: p.budget, perPayment: p.per_payment, perPayeeMonthly: p.per_payee_monthly, deadline: p.deadline, payeesHash: p.payees_hash });
   try {
-    const txid = await recordPolicy({ id: p.id, hash, payer: p.payer, owner, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline });
+    const key = recordKey(p.id);
+    const txid = await recordPolicy({ id: key, hash, payer: p.payer, owner, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline });
     if (txid) {
-      db.prepare('UPDATE policies SET anchor_tx = ? WHERE id = ?').run(txid, p.id);
-      logEvent('POLICY_RECORDED', { policyId: p.id, txid });
+      db.prepare('UPDATE policies SET anchor_tx = ?, record_key = ? WHERE id = ?').run(txid, key, p.id);
+      logEvent('POLICY_RECORDED', { policyId: p.id, recordKey: key, txid });
     }
   } catch (e) {
     logEvent('POLICY_RECORD_FAILED', { policyId: p.id, error: msg(e) });
@@ -143,7 +145,7 @@ export async function stopPolicy() {
   if (!p || p.status !== 'ACTIVE') throw new Error('There is no active policy to stop.');
   db.prepare("UPDATE policies SET status = 'STOPPED' WHERE id = ?").run(p.id);
   logEvent('POLICY_STOPPED', { policyId: p.id });
-  recordStop(p.id)
+  recordStop(p.record_key ?? p.id)
     .then((txid) => txid && logEvent('POLICY_STOP_RECORDED', { policyId: p.id, txid }))
     .catch((e) => logEvent('POLICY_RECORD_FAILED', { policyId: p.id, error: msg(e) }));
   return getPolicy(p.id);
@@ -315,7 +317,100 @@ export async function payBatch(batchId: number) {
   if (batch.status === 'REVIEW') await rescreen(batchId);
   const problem = approvalProblem(getBatch(batchId)!);
   if (problem) throw new Error(problem);
+  if (vaultInfo()) await releaseFromVault(batchId);
   startRun(batchId);
+}
+
+/* ---------------- vault ---------------- */
+
+// The vault checks the owner's approval signature itself and sends exactly this batch's money,
+// plus GasFree's fee per payment, to the payer's GasFree account. Once per batch.
+async function releaseFromVault(batchId: number) {
+  const a = JSON.parse(getBatch(batchId)!.approval!) as Approval;
+  if ((await vaultReleased(a.value)) > 0) return; // released before, for example when a start failed later
+  const v = (await vaultState())!;
+  const amount = Number(a.value.total) + Number(a.value.count) * v.feePerPayment;
+  const facts = { vault: v.address, policyId: Number(a.value.policyId), rowsHash: a.value.rowsHash, count: Number(a.value.count), total: Number(a.value.total), amount };
+  let reason: string | null = null;
+  if (v.frozen) reason = 'The owner has frozen the vault.';
+  else if (v.owner !== a.owner) reason = `The vault’s owner is ${v.owner}, but ${a.owner} approved this batch. The vault only accepts its owner’s approval.`;
+  else if (v.balance < amount) reason = `The vault holds ${(v.balance / 1e6).toFixed(2)} USDT, less than this batch needs (${(amount / 1e6).toFixed(2)}). Move USDT into the vault first.`;
+  if (!reason) {
+    try {
+      const txid = await vaultRelease({ ...a.value, signature: a.signature });
+      logEvent('VAULT_RELEASED', { ...facts, txid }, batchId);
+      return;
+    } catch (e) {
+      reason = msg(e);
+    }
+  }
+  logEvent('VAULT_REFUSED', { ...facts, reason }, batchId);
+  throw new Error(reason);
+}
+
+export async function vaultView() {
+  const v = await vaultState();
+  if (!v) return null;
+  const released = db.prepare("SELECT body FROM events WHERE type = 'VAULT_RELEASED'").all() as { body: string }[];
+  return {
+    ...v,
+    releasedTotal: released.reduce((s, e) => s + JSON.parse(e.body).data.amount, 0),
+    releases: released.length,
+    ownerIsDemoKey: !!process.env.OWNER_PRIVATE_KEY && addressFromKey(process.env.OWNER_PRIVATE_KEY) === v.owner,
+    // Just enough ABI for TronLink to send setFrozen when the owner is a TronLink account.
+    abi: vaultInfo()!.abi.filter((f: { name?: string }) => f.name === 'setFrozen'),
+  };
+}
+
+export async function freezeVault(frozen: boolean) {
+  const key = process.env.OWNER_PRIVATE_KEY;
+  const v = await vaultState();
+  if (!v) throw new Error('No vault is deployed. Run npm run deploy:vault.');
+  if (!key || addressFromKey(key) !== v.owner) throw new Error('The vault’s owner is not the demo owner key. Freeze it from TronLink.');
+  const txid = await vaultSetFrozen(key, frozen);
+  logEvent(frozen ? 'VAULT_FROZEN' : 'VAULT_UNFROZEN', { vault: v.address, txid, by: 'server-demo-key' });
+  return vaultView();
+}
+
+// Records a freeze the owner sent from TronLink, after checking the chain agrees.
+export async function noteVaultFreeze(txid: string) {
+  const v = await vaultState();
+  if (!v) throw new Error('No vault is deployed.');
+  const info: any = await tw.trx.getTransactionInfo(txid); // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (info?.receipt?.result !== 'SUCCESS') throw new Error('That transaction did not succeed on chain.');
+  logEvent(v.frozen ? 'VAULT_FROZEN' : 'VAULT_UNFROZEN', { vault: v.address, txid, by: 'tronlink' });
+  return vaultView();
+}
+
+// Moves the USDT sitting idle in the payer's GasFree account back into the vault, as one GasFree
+// transfer. The destination is fixed to the vault, so this cannot pay anyone else.
+export async function returnToVault() {
+  const v = vaultInfo();
+  if (!v) throw new Error('No vault is deployed. Run npm run deploy:vault.');
+  const busy = db.prepare("SELECT id FROM batches WHERE status IN ('RUNNING', 'PAUSED')").get() as { id: number } | undefined;
+  if (busy) throw new Error(`Batch #${busy.id} is still being paid or is paused. Finish it first.`);
+  const payer = payerAddress();
+  const [{ token, provider }, acct] = await Promise.all([gasfreeConfig(), gasfree.account(payer)]);
+  const fee = Number(token.transferFee) + (acct.active ? 0 : Number(token.activateFee));
+  const balance = await usdtBalance(acct.gasFreeAddress);
+  const amount = balance - fee;
+  if (amount <= 0) throw new Error('The GasFree account holds no idle USDT beyond the transfer fee.');
+  const deadline = nowSec() + (provider.config?.defaultDeadlineDuration ?? 180);
+  const permit = await signPermit(
+    { token: token.tokenAddress, serviceProvider: provider.address, user: payer, receiver: v.address, value: String(amount), maxFee: String(fee), deadline, nonce: acct.nonce },
+    payerKey(),
+  );
+  const { id } = await gasfree.submit(permit);
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const t = await gasfree.status(id).catch(() => null);
+    if (t?.state === 'SUCCEED' && t.txnHash) {
+      logEvent('VAULT_FUNDED', { vault: v.address, from: acct.gasFreeAddress, amount, fee: t.txnTotalFee ?? fee, txnHash: t.txnHash, traceId: id });
+      return vaultView();
+    }
+    if (t?.state === 'FAILED') throw new Error('GasFree could not complete the transfer to the vault.');
+  }
+  throw new Error(`The transfer to the vault is still pending (GasFree trace ${id}). Check again shortly.`);
 }
 
 type Review = { rows: { line: number; ko: string; en: string; action: 'fix' | 'hold' | 'pay' }[] };
@@ -407,7 +502,7 @@ export function evidence(batchId: number) {
   const batch = getBatch(batchId)!;
   const policies = (db.prepare("SELECT * FROM policies WHERE status != 'DRAFT' ORDER BY id").all() as ReturnType<typeof getPolicy>[]).map((p) => ({
     id: p!.id, owner: p!.owner, signedBy: p!.signed_by, signature: p!.signature, status: p!.status,
-    payees: JSON.parse(p!.payees), policyHash: p!.policy_hash, recordTx: p!.anchor_tx,
+    payees: JSON.parse(p!.payees), policyHash: p!.policy_hash, recordTx: p!.anchor_tx, recordKey: p!.record_key ?? p!.id,
     domain: policyDomain, types: policyTypesFor(p!), value: policyValue(p!),
   }));
   const rules = screenRules();
@@ -417,7 +512,8 @@ export function evidence(batchId: number) {
     token: NILE_USDT,
     exportedAt: new Date().toISOString(),
     registry: registryInfo()?.address ?? null,
-    batch: { id: batch.id, source: batch.source, policyId: batch.policy_id, status: batch.status, closeHash: batch.close_hash, sealTx: batch.anchor_tx },
+    vault: vaultInfo() && { address: vaultInfo()!.address, payout: vaultInfo()!.payout, feePerPayment: vaultInfo()!.feePerPayment },
+    batch: { id: batch.id, source: batch.source, policyId: batch.policy_id, status: batch.status, closeHash: batch.close_hash, sealTx: batch.anchor_tx, recordKey: batch.record_key ?? batch.id },
     rules: { travelRuleMin: rules.travelMin, travelRuleKrw: rules.travelKrw, krwPerUsdt: rules.krwPerUsdt, contactWaitHours: rules.waitSec / 3600 },
     policies,
     rows: batchRows(batchId).map((r) => ({
