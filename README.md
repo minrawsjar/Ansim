@@ -445,13 +445,19 @@ Open https://ansim-ecru.vercel.app, press **Connect TronLink** and switch to Nil
 
 ### Live Demo: The Audience Becomes the Families
 
-Open **Live demo** (`/stage`) on the big screen. People scan the QR code, and each phone makes its own TRON wallet with 0 TRX. The key stays on the phone. They pick a name and a city in Vietnam, the Philippines or Nepal, and appear on the map.
+Open **Live demo** (`/stage`) on the big screen. People scan the QR code and join with **their own TRON wallet**: they paste an address or use TronLink. People without a wallet can let the phone make one; its key stays on the phone. They pick a name and a city in Vietnam, the Philippines or Nepal, and appear on the map.
+
+Checks run the moment they join:
+- **Turned away at once:** reported, Tether-frozen, lookalike or invalid wallets.
+- **Checked in the background:** their own wallet's public record on mainnet, with the AI's plain-words note, shown to both them and the operator before **Accept**.
+
+Ansim pays the **GasFree account** that GasFree derives from their wallet, and shows it to them. Only their wallet's key can move money out of it, and they never need TRX.
 
 1. **Accept** them. Each wallet goes through the same checks as any new contact.
 2. **Add them to the signed limits.** Same budget and caps, signed again in TronLink.
 3. **Ask the agent** to send everyone who joined a few USDT.
 4. **Approve and pay.** The owner signs the exact rows and the vault releases them.
-5. **Watch the phones.** Each one chimes, buzzes and shows the amount in local currency, in its language, with the TronScan proof. Then press **Send it back**: the phone signs a GasFree permit itself, and a wallet that has never held TRX sends USDT back into the vault.
+5. **Watch the phones.** Each one chimes, buzzes and shows the amount in local currency, in its language, with the TronScan proof. Then press **Send it back**. The wallet signs a GasFree permit itself, in TronLink or on the phone, and a wallet that has never held TRX sends USDT back into the vault.
 
 Payments go to each phone's GasFree account, so it can spend with GasFree. The first transfer out costs 1.00 USDT once to open the account, plus the 0.30 fee, taken from the USDT. So pay at least 2 USDT. GasFree takes one transfer at a time, about a minute each, so it suits 3 to 5 people.
 
