@@ -1,10 +1,13 @@
 import { TronWeb } from 'tronweb';
 
-export type Payee = { address: string; name: string; usual: number }; // usual amount in base units
-export type ScreenRow = { line: number; sender: string; receiver: string; amount: number | null; note: string; flags: string[] };
+export type Payee = { address: string; name: string; usual: number; added?: number }; // usual in base units, added in unix seconds
+export type ScreenRow = { line: number; sender: string; receiver: string; amount: number | null; note: string; flags: string[]; travel?: boolean };
+// waitSec: how long a new contact waits before it can be paid. travelMin: the Travel Rule threshold in base units.
+export type ScreenRules = { now?: number; waitSec?: number; travelMin?: number };
 
-// Rows with these flags can never be paid, whatever the operator or the model says.
-export const BLOCKING = new Set(['INVALID_ADDRESS', 'INVALID_AMOUNT', 'TETHER_FROZEN', 'REPORTED_WALLET']);
+// Rows with these flags can never be paid, whatever the operator or the model says. The last two
+// clear by themselves: once the waiting period passes, or once the Travel Rule details are added.
+export const BLOCKING = new Set(['INVALID_ADDRESS', 'INVALID_AMOUNT', 'TETHER_FROZEN', 'REPORTED_WALLET', 'NEW_CONTACT_WAIT', 'TRAVEL_RULE_INFO']);
 
 export const FLAG_INFO: Record<string, string> = {
   INVALID_ADDRESS: 'Not a valid TRON address',
@@ -16,6 +19,8 @@ export const FLAG_INFO: Record<string, string> = {
   REPORTED_WALLET: 'Wallet is on the reported scam list',
   TETHER_FROZEN: 'Tether has frozen this wallet',
   MANY_SENDERS_ONE_WALLET: 'Three or more different senders pay this one new wallet (possible money mule)',
+  NEW_CONTACT_WAIT: 'Contact was added too recently; new contacts wait before they can be paid (delayed transfer, 지연이체)',
+  TRAVEL_RULE_INFO: 'At or above the Travel Rule threshold; sender and recipient details are required first',
 };
 
 const B58 = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
@@ -41,7 +46,9 @@ export async function screen(
   book: Map<string, Payee>,
   reported: Set<string>,
   isFrozen: (address: string) => Promise<boolean | null>,
+  rules: ScreenRules = {},
 ) {
+  const now = rules.now ?? Date.now() / 1000;
   const seen = new Set<string>();
   const senders = new Map<string, Set<string>>();
   const known = [...book.keys()];
@@ -61,9 +68,11 @@ export async function screen(
     if (!payee) {
       flag('NEW_PAYEE');
       if (known.some((a) => looksAlike(a, r.receiver))) flag('LOOKALIKE');
-    } else if (r.amount !== null && payee.usual > 0 && r.amount > 3 * payee.usual) {
-      flag('UNUSUAL_AMOUNT');
+    } else {
+      if (rules.waitSec && payee.added && now - payee.added < rules.waitSec) flag('NEW_CONTACT_WAIT');
+      if (r.amount !== null && payee.usual > 0 && r.amount > 3 * payee.usual) flag('UNUSUAL_AMOUNT');
     }
+    if (rules.travelMin && r.amount !== null && r.amount >= rules.travelMin && !r.travel) flag('TRAVEL_RULE_INFO');
     if (reported.has(r.receiver)) flag('REPORTED_WALLET');
     if (!senders.has(r.receiver)) senders.set(r.receiver, new Set());
     senders.get(r.receiver)!.add(r.sender.trim().toLowerCase());

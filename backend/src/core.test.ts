@@ -2,7 +2,7 @@
 // Run with: npm run check
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { refuseReason, payeesHash } from './policy';
+import { refuseReason, payeesHash, rowsHash, approvalValue } from './policy';
 import { screen, looksAlike, validAddress, contactProblem } from './screen';
 import { parseAmount, ruleMapping } from './importer';
 
@@ -78,4 +78,30 @@ test('a new contact is refused when it is invalid, saved already, a lookalike or
   assert.match(contactProblem(lan, book, new Set())!, /already saved as Lan/);
   assert.match(contactProblem(twin, book, new Set())!, /address-poisoning/);
   assert.match(contactProblem(B, book, new Set([B]))!, /reported/);
+});
+
+test('the monthly cap per contact counts what the contact already got in 30 days', () => {
+  const capped = { ...policy, per_payee_monthly: 20_000_000 };
+  assert.equal(refuseReason(capped, 0, A, 10_000_000, 0, 1_900_000_000, 10_000_000), null);
+  assert.equal(refuseReason(capped, 0, A, 10_000_000, 0, 1_900_000_000, 10_000_001), 'OVER_MONTHLY_PAYEE_CAP');
+  assert.equal(refuseReason({ ...policy, per_payee_monthly: 0 }, 0, A, 10_000_000, 0, 1_900_000_000, 99_000_000), null);
+});
+
+test('the batch approval covers exactly the rows, in any order', () => {
+  const rows = [{ line: 3, receiver: A, amount: 2_000_000 }, { line: 2, receiver: B, amount: 1_000_000 }];
+  assert.equal(rowsHash(rows), rowsHash([...rows].reverse()));
+  assert.notEqual(rowsHash(rows), rowsHash([rows[0], { ...rows[1], amount: 1_000_001 }]));
+  assert.deepEqual(approvalValue(7, 2, rows), { batchId: '7', policyId: '2', rowsHash: rowsHash(rows), count: '2', total: '3000000' });
+});
+
+test('new contacts wait, and large transfers need Travel Rule details', async () => {
+  const now = 1_900_000_000;
+  const book = new Map([[A, { address: A, name: 'Lan', usual: 0, added: now - 3600 }], [B, { address: B, name: 'Minh', usual: 0, added: 0 }]]);
+  const rows = [
+    { line: 2, sender: 'x', receiver: A, amount: 1_000_000, note: '', flags: [] as string[] },
+    { line: 3, sender: 'y', receiver: B, amount: 800_000_000, note: '', flags: [] as string[] },
+    { line: 4, sender: 'z', receiver: B, amount: 800_000_000, note: 'b', flags: [] as string[], travel: true },
+  ];
+  await screen(rows, book, new Set(), async () => false, { now, waitSec: 3 * 3600, travelMin: 714_285_715 });
+  assert.deepEqual(rows.map((r) => r.flags), [['NEW_CONTACT_WAIT'], ['TRAVEL_RULE_INFO'], []]);
 });

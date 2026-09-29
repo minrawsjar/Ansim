@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { db } from './db';
 
-export type Flow = 'map_columns' | 'review_flags' | 'receipt' | 'audit_qa';
+export type Flow = 'map_columns' | 'review_flags' | 'receipt' | 'audit_qa' | 'dispute';
 export const MODEL = process.env.KILN_MODEL ?? 'gpt-oss-120b';
 export const kilnConfigured = () => !!(process.env.KILN_BASE_URL && process.env.KILN_API_KEY);
 
@@ -57,9 +57,10 @@ INVALID_ADDRESS: not a valid TRON address. INVALID_AMOUNT: bad amount. DUPLICATE
 NEW_PAYEE: wallet not in the payee book. LOOKALIKE: resembles a known payee's wallet but differs (address poisoning scam).
 UNUSUAL_AMOUNT: over 3x the payee's usual amount. REPORTED_WALLET: on the reported scam list. TETHER_FROZEN: frozen by Tether.
 MANY_SENDERS_ONE_WALLET: three or more different senders pay one new wallet, a common money-mule pattern in voice-phishing cases.
+NEW_CONTACT_WAIT: the contact was added only hours ago and is still in its waiting period (delayed transfer). TRAVEL_RULE_INFO: the amount is at or above the Travel Rule threshold and the sender's details are missing.
 For each row, write one short plain sentence in Korean ("ko") and one in English ("en") explaining the risk, using the note and payee history when they explain it.
 Suggest "action": "fix" when it is a data error the operator can correct, "hold" when it must not be paid until someone checks, or "pay" only when the context clearly explains the flag.
-Never suggest "pay" for INVALID_ADDRESS, TETHER_FROZEN, REPORTED_WALLET, LOOKALIKE or MANY_SENDERS_ONE_WALLET.
+Never suggest "pay" for INVALID_ADDRESS, TETHER_FROZEN, REPORTED_WALLET, LOOKALIKE, MANY_SENDERS_ONE_WALLET, NEW_CONTACT_WAIT or TRAVEL_RULE_INFO.
 Return {"rows": [{"line": number, "ko": string, "en": string, "action": "fix" | "hold" | "pay"}]}.`,
 
   receipt: `Write a short receipt for the business owner about a finished USDT payout batch. Use only the numbers you are given.
@@ -69,4 +70,11 @@ Return {"ko": "3 to 5 sentences in Korean", "en": "the same in English"}.`,
   audit_qa: `You answer an auditor's question about a USDT payout batch using only the records provided: the signed policy, the rows and the hash-chained event log.
 Cite event ids like [#12] for every fact. If the records do not answer the question, say so.
 Return {"answer": string}.`,
+
+  dispute: `You help a licensed Korean remittance operator answer a customer who asks about a payment, for example "my family did not get the money".
+Use only the records given: the matching payments, their hash-chained log events, and what the TRON chain shows for each transaction hash.
+Say plainly whether the money arrived, when, to which wallet (first and last four characters) and with which transaction hash.
+If a payment was held, refused or failed, say why in plain words. If the chain shows the transfer went to a different wallet than the family's, say so.
+Cite log events like [#12]. If the records do not show the payment, say so and suggest checking the sender's name or the wallet.
+Return {"ko": "the answer in Korean", "en": "the same in English"}.`,
 };

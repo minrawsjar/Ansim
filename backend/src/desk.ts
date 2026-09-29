@@ -1,13 +1,14 @@
 import fs from 'node:fs';
-import { randomInt } from 'node:crypto';
-import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, nowSec, type Row } from './db';
+import { randomInt, randomBytes } from 'node:crypto';
+import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, nowSec, type Row, type Batch } from './db';
 import { logEvent, allEvents, batchEvents } from './log';
-import { policyDomain, policyTypes, policyValue, policyHash, payeesHash } from './policy';
+import { policyDomain, policyTypesFor, policyValue, policyHash, payeesHash, approvalTypes, approvalValue } from './policy';
 import { parseSheet, headerSignature, ruleMapping, validMapping, toRows, type Mapping } from './importer';
 import { screen, contactProblem, BLOCKING, type Payee, type ScreenRow } from './screen';
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
-import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, NILE_USDT } from './tron';
-import { payerAddress, summarize, msg } from './orchestrator';
+import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, NILE_USDT } from './tron';
+import { payerAddress, summarize, msg, payeeMonth, startRun, isRunning } from './orchestrator';
+import { telegramConfigured } from './alerts';
 
 const dataFile = (name: string) => new URL(`../data/${name}`, import.meta.url);
 const readJson = <T>(name: string, fallback: T): T => {
@@ -18,17 +19,37 @@ const readJson = <T>(name: string, fallback: T): T => {
   }
 };
 
+// Screening settings. New contacts wait before they can be paid, like the delayed-transfer service
+// (지연이체) Korean banks offer against voice phishing, which holds transfers for at least 3 hours.
+// Korea's Travel Rule applies to virtual-asset transfers of ₩1,000,000 or more; the KRW rate is set here.
+export function screenRules() {
+  const krwPerUsdt = Number(process.env.KRW_PER_USDT || 1400);
+  const travelKrw = Number(process.env.TRAVEL_RULE_KRW || 1_000_000);
+  return {
+    waitSec: Number(process.env.CONTACT_WAIT_HOURS ?? 3) * 3600,
+    travelMin: Math.ceil((travelKrw / krwPerUsdt) * 1e6),
+    krwPerUsdt, travelKrw,
+  };
+}
+
 // The payee book (contacts): wallets this business pays, with the usual amount in USDT.
-// Seeded once from data/payees.json, then edited in the console. user_version marks the seed as done,
-// so removing every contact does not bring the demo contacts back.
-type Contact = { address: string; name: string; country: string | null; usual: number };
+// Seeded once from data/payees.json, then edited in the console. user_version records which seed steps
+// ran, so removing every contact does not bring the demo contacts back. Seeded contacts get
+// created_at 0: they were paid before, so they skip the waiting period for new contacts.
+type Contact = { address: string; name: string; country: string | null; usual: number; created_at: number };
 export function payeeBook(): Contact[] {
-  if (db.pragma('user_version', { simple: true }) === 0) {
-    const add = db.prepare('INSERT OR IGNORE INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, ?)');
-    for (const p of readJson<Contact[]>('payees.json', [])) add.run(p.address, p.name, p.country ?? null, p.usual ?? 0, nowSec());
-    db.pragma('user_version = 1');
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version < 2) {
+    const seed = readJson<Contact[]>('payees.json', []);
+    const add = db.prepare('INSERT OR IGNORE INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, 0)');
+    const old = db.prepare('UPDATE payees SET created_at = 0 WHERE address = ?');
+    for (const p of seed) {
+      if (version < 1) add.run(p.address, p.name, p.country ?? null, p.usual ?? 0);
+      else old.run(p.address);
+    }
+    db.pragma('user_version = 2');
   }
-  return db.prepare('SELECT address, name, country, usual FROM payees ORDER BY created_at, rowid').all() as Contact[];
+  return db.prepare('SELECT address, name, country, usual, created_at FROM payees ORDER BY created_at, rowid').all() as Contact[];
 }
 
 export async function addContact(input: { name?: string; country?: string; address?: string; usual?: number | string }) {
@@ -55,25 +76,29 @@ export function removeContact(address: string) {
   return payeeBook();
 }
 
-const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6) }]));
+const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6), added: p.created_at }]));
 // Stand-in for wallets reported to police and exchanges.
 const reported = () => new Set(readJson<string[]>('reported.json', []));
 
 /* ---------------- policy ---------------- */
 
-export function draftPolicy(input: { budget: number; perPayment: number; deadline: number; payees: string[] }) {
+export function draftPolicy(input: { budget: number; perPayment: number; perPayeeMonthly?: number; deadline: number; payees: string[] }) {
   if (!(input.budget > 0) || !(input.perPayment > 0)) throw new Error('Budget and per-payment cap must be above zero.');
   if (!(input.deadline > nowSec())) throw new Error('The deadline must be in the future.');
   if (!input.payees.length) throw new Error('Allow at least one payee.');
   const payees = [...new Set(input.payees)].sort();
+  // 0 means no monthly cap per contact.
+  const monthly = Math.round(Number(input.perPayeeMonthly ?? 0) * 1e6);
+  if (!Number.isFinite(monthly) || monthly < 0) throw new Error('The monthly cap per contact must be zero or more.');
+  if (monthly && monthly < Math.round(input.perPayment * 1e6)) throw new Error('The monthly cap per contact must be at least the cap per payment.');
   const r = db
     .prepare(
-      `INSERT INTO policies (payer, budget, per_payment, payees, payees_hash, deadline, policy_nonce, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
+      `INSERT INTO policies (payer, budget, per_payment, per_payee_monthly, payees, payees_hash, deadline, policy_nonce, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
     )
-    .run(payerAddress(), Math.round(input.budget * 1e6), Math.round(input.perPayment * 1e6), JSON.stringify(payees), payeesHash(payees), Math.floor(input.deadline), randomInt(1, 2 ** 31), nowSec());
+    .run(payerAddress(), Math.round(input.budget * 1e6), Math.round(input.perPayment * 1e6), monthly, JSON.stringify(payees), payeesHash(payees), Math.floor(input.deadline), randomInt(1, 2 ** 31), nowSec());
   const p = getPolicy(Number(r.lastInsertRowid))!;
-  return { id: p.id, domain: policyDomain, types: policyTypes, value: policyValue(p) };
+  return { id: p.id, domain: policyDomain, types: policyTypesFor(p), value: policyValue(p) };
 }
 
 export async function activatePolicy(input: { id: number; signature?: string; owner?: string; serverSign?: boolean }) {
@@ -85,14 +110,14 @@ export async function activatePolicy(input: { id: number; signature?: string; ow
   if (input.serverSign) {
     const key = process.env.OWNER_PRIVATE_KEY;
     if (!key) throw new Error('OWNER_PRIVATE_KEY is not set, so the server cannot sign as the owner.');
-    signature = await tw.trx.signTypedData(policyDomain, policyTypes, value, key);
+    signature = await tw.trx.signTypedData(policyDomain, policyTypesFor(p), value, key);
     owner = addressFromKey(key);
     signedBy = 'server-demo-key';
   }
   if (!signature || !owner) throw new Error('A signature and the owner address are required.');
   let ok = false;
   try {
-    ok = await tw.trx.verifyTypedData(policyDomain, policyTypes, value, signature, owner);
+    ok = await tw.trx.verifyTypedData(policyDomain, policyTypesFor(p), value, signature, owner);
   } catch {
     ok = false;
   }
@@ -100,7 +125,7 @@ export async function activatePolicy(input: { id: number; signature?: string; ow
   const hash = policyHash(p, signature);
   db.prepare("UPDATE policies SET status = 'REPLACED' WHERE status IN ('ACTIVE', 'STOPPED')").run();
   db.prepare("UPDATE policies SET status = 'ACTIVE', owner = ?, signature = ?, signed_by = ?, policy_hash = ? WHERE id = ?").run(owner, signature, signedBy, hash, p.id);
-  logEvent('POLICY_ACTIVATED', { policyId: p.id, policyHash: hash, owner, signedBy, payer: p.payer, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline, payeesHash: p.payees_hash });
+  logEvent('POLICY_ACTIVATED', { policyId: p.id, policyHash: hash, owner, signedBy, payer: p.payer, budget: p.budget, perPayment: p.per_payment, perPayeeMonthly: p.per_payee_monthly, deadline: p.deadline, payeesHash: p.payees_hash });
   try {
     const txid = await recordPolicy({ id: p.id, hash, payer: p.payer, owner, budget: p.budget, perPayment: p.per_payment, deadline: p.deadline });
     if (txid) {
@@ -149,8 +174,8 @@ async function mapColumns(header: string[], body: string[][]): Promise<{ mapping
 // Re-runs every check for the whole batch, because duplicates and many-senders depend on other rows.
 async function rescreen(batchId: number) {
   const rows = batchRows(batchId);
-  const list: (ScreenRow & { id: number })[] = rows.map((r) => ({ id: r.id, line: r.line, sender: r.sender ?? '', receiver: r.receiver, amount: r.amount, note: r.note ?? '', flags: [] }));
-  const result = await screen(list, bookMap(), reported(), isTetherFrozen);
+  const list: (ScreenRow & { id: number })[] = rows.map((r) => ({ id: r.id, line: r.line, sender: r.sender ?? '', receiver: r.receiver, amount: r.amount, note: r.note ?? '', flags: [], travel: !!r.travel }));
+  const result = await screen(list, bookMap(), reported(), isTetherFrozen, screenRules());
   const tx = db.transaction(() => {
     for (const s of list) {
       const r = rows.find((x) => x.id === s.id)!;
@@ -182,7 +207,7 @@ export async function importFile(buf: Buffer, filename: string) {
   return batchId;
 }
 
-export async function editRow(rowId: number, patch: { receiver?: string; amount?: string; decision?: 'pay' | 'hold' | 'remove' }) {
+export async function editRow(rowId: number, patch: { receiver?: string; amount?: string; decision?: 'pay' | 'hold' | 'remove'; travel?: { originatorId?: string; purpose?: string } }) {
   const row = getRow(rowId);
   if (!row) throw new Error('Row not found.');
   const batch = getBatch(row.batch_id)!;
@@ -195,6 +220,14 @@ export async function editRow(rowId: number, patch: { receiver?: string; amount?
     const after = getRow(rowId);
     updateRow(rowId, { decision: JSON.parse(after.flags).length ? 'hold' : 'pay' });
   }
+  if (patch.travel) {
+    // Travel Rule details stay off chain and out of the shared log; only the fact that they were added is logged.
+    const originatorId = String(patch.travel.originatorId ?? '').trim().slice(0, 100);
+    const purpose = String(patch.travel.purpose ?? '').trim().slice(0, 100);
+    if (!originatorId || !purpose) throw new Error('Enter the sender’s customer ID or date of birth, and the purpose of the transfer.');
+    updateRow(rowId, { travel: JSON.stringify({ originatorId, purpose, addedAt: nowSec() }) });
+    await rescreen(row.batch_id);
+  }
   if (patch.decision) {
     const flags: string[] = JSON.parse(getRow(rowId).flags);
     const blocking = flags.filter((f) => BLOCKING.has(f));
@@ -202,8 +235,87 @@ export async function editRow(rowId: number, patch: { receiver?: string; amount?
     updateRow(rowId, { decision: patch.decision });
   }
   const after = getRow(rowId);
-  logEvent('ROW_EDITED', { line: row.line, before, after: { receiver: after.receiver, amount: after.amount, decision: after.decision }, flags: JSON.parse(after.flags) }, row.batch_id, rowId);
+  logEvent('ROW_EDITED', { line: row.line, before, after: { receiver: after.receiver, amount: after.amount, decision: after.decision }, flags: JSON.parse(after.flags), ...(patch.travel ? { travelRuleDetailsAdded: true } : {}) }, row.batch_id, rowId);
+  if (batch.approval) {
+    db.prepare('UPDATE batches SET approval = NULL WHERE id = ?').run(row.batch_id);
+    logEvent('APPROVAL_CLEARED', { reason: `Line ${row.line} changed after the owner approved` }, row.batch_id);
+  }
   return after;
+}
+
+// Runs every check again, for example after a new contact's waiting period has passed.
+export async function recheck(batchId: number) {
+  if (getBatch(batchId)!.status !== 'REVIEW') throw new Error('Checks can only run again before the batch is paid.');
+  await rescreen(batchId);
+  const flagged = batchRows(batchId).filter((r) => JSON.parse(r.flags).length).length;
+  logEvent('BATCH_RECHECKED', { flagged }, batchId);
+  return { flagged };
+}
+
+/* ---------------- owner approval ---------------- */
+
+const payRows = (batchId: number) => batchRows(batchId).filter((r) => r.decision === 'pay');
+
+export function approvalDraft(batchId: number) {
+  const batch = getBatch(batchId)!;
+  if (batch.status === 'CLOSED' || batch.status === 'RUNNING') throw new Error('This batch is already being paid or closed.');
+  const policy = activePolicy();
+  if (!policy || policy.status !== 'ACTIVE') throw new Error('Sign the payment limits first.');
+  const rows = payRows(batchId);
+  if (!rows.length) throw new Error('No rows are marked to pay.');
+  return { domain: policyDomain, types: approvalTypes, value: approvalValue(batchId, policy.id, rows), owner: policy.owner };
+}
+
+export async function approveBatch(batchId: number, input: { signature?: string; owner?: string; serverSign?: boolean }) {
+  const draft = approvalDraft(batchId);
+  let { signature, owner } = input;
+  let signedBy = 'tronlink';
+  if (input.serverSign) {
+    const key = process.env.OWNER_PRIVATE_KEY;
+    if (!key) throw new Error('OWNER_PRIVATE_KEY is not set, so the server cannot sign as the owner.');
+    signature = await tw.trx.signTypedData(policyDomain, approvalTypes, draft.value, key);
+    owner = addressFromKey(key);
+    signedBy = 'server-demo-key';
+  }
+  if (!signature || !owner) throw new Error('A signature and the owner address are required.');
+  if (owner !== draft.owner) throw new Error('Only the owner who signed the payment limits can approve this batch.');
+  let ok = false;
+  try {
+    ok = await tw.trx.verifyTypedData(policyDomain, approvalTypes, draft.value, signature, owner);
+  } catch {
+    ok = false;
+  }
+  if (!ok) throw new Error('The signature does not match this batch and owner address.');
+  const approval = { value: draft.value, signature, owner, signedBy, at: nowSec() };
+  db.prepare('UPDATE batches SET approval = ? WHERE id = ?').run(JSON.stringify(approval), batchId);
+  const v = draft.value;
+  logEvent('BATCH_APPROVED', { policyId: Number(v.policyId), rowsHash: v.rowsHash, count: Number(v.count), total: Number(v.total), owner, signedBy, signature }, batchId);
+  return approval;
+}
+
+type Approval = { value: ReturnType<typeof approvalValue>; signature: string; owner: string; signedBy: string; at: number };
+
+// Why this batch cannot be paid yet, or null. The approval must cover exactly the rows marked to pay,
+// under the policy that is active now.
+function approvalProblem(batch: Batch): string | null {
+  if (!batch.approval) return 'The owner has not approved this batch yet.';
+  const a = JSON.parse(batch.approval) as Approval;
+  const policy = activePolicy();
+  if (!policy || String(policy.id) !== a.value.policyId) return 'New payment limits were signed after the owner approved. Ask the owner to approve again.';
+  if (approvalValue(batch.id, policy.id, payRows(batch.id)).rowsHash !== a.value.rowsHash) return 'The rows changed after the owner approved. Ask the owner to approve again.';
+  return null;
+}
+
+// Before paying, every check runs again: the freeze list is live, and a contact could have been
+// removed and added again. Then the owner's approval must still match the rows.
+export async function payBatch(batchId: number) {
+  if (isRunning(batchId)) return;
+  const batch = getBatch(batchId)!;
+  if (batch.status === 'CLOSED') throw new Error('This batch is already closed.');
+  if (batch.status === 'REVIEW') await rescreen(batchId);
+  const problem = approvalProblem(getBatch(batchId)!);
+  if (problem) throw new Error(problem);
+  startRun(batchId);
 }
 
 type Review = { rows: { line: number; ko: string; en: string; action: 'fix' | 'hold' | 'pay' }[] };
@@ -262,14 +374,28 @@ export async function askAuditor(batchId: number, question: string) {
 /* ---------------- read models ---------------- */
 
 const requestIdOf = (r: Row) => (r.permit ? (JSON.parse(r.permit).requestId as string | undefined) ?? null : null);
-const parseRow = (r: Row) => ({ ...r, flags: JSON.parse(r.flags) as string[], agent: r.agent ? JSON.parse(r.agent) : null, permit: undefined, request_id: requestIdOf(r) });
+
+// Each row to pay gets an unguessable link for the family's receipt page, made the first time it is needed.
+function receiptToken(r: Row) {
+  if (r.decision !== 'pay') return null;
+  if (r.receipt_token) return r.receipt_token;
+  const token = randomBytes(12).toString('base64url');
+  db.prepare('UPDATE rows SET receipt_token = ? WHERE id = ?').run(token, r.id);
+  return token;
+}
+
+const parseRow = (r: Row) => ({
+  ...r, flags: JSON.parse(r.flags) as string[], agent: r.agent ? JSON.parse(r.agent) : null, permit: undefined,
+  request_id: requestIdOf(r), receipt_token: receiptToken(r), travel: r.travel ? JSON.parse(r.travel) : null,
+});
 
 export function batchView(batchId: number) {
   const batch = getBatch(batchId);
   if (!batch) throw new Error('Batch not found.');
   const rows = batchRows(batchId);
   return {
-    batch: { ...batch, columns: JSON.parse(batch.columns), receipt: batch.receipt ? JSON.parse(batch.receipt) : null },
+    batch: { ...batch, columns: JSON.parse(batch.columns), receipt: batch.receipt ? JSON.parse(batch.receipt) : null, approval: batch.approval ? (JSON.parse(batch.approval) as Approval) : null },
+    approvalProblem: batch.status === 'CLOSED' ? null : approvalProblem(batch),
     policy: batch.policy_id ? getPolicy(batch.policy_id) : null,
     rows: rows.map(parseRow),
     summary: summarize(rows),
@@ -282,20 +408,23 @@ export function evidence(batchId: number) {
   const policies = (db.prepare("SELECT * FROM policies WHERE status != 'DRAFT' ORDER BY id").all() as ReturnType<typeof getPolicy>[]).map((p) => ({
     id: p!.id, owner: p!.owner, signedBy: p!.signed_by, signature: p!.signature, status: p!.status,
     payees: JSON.parse(p!.payees), policyHash: p!.policy_hash, recordTx: p!.anchor_tx,
-    domain: policyDomain, types: policyTypes, value: policyValue(p!),
+    domain: policyDomain, types: policyTypesFor(p!), value: policyValue(p!),
   }));
+  const rules = screenRules();
   return {
-    format: 'ansim-evidence-1',
+    format: 'ansim-evidence-2',
     network: 'tron-nile',
     token: NILE_USDT,
     exportedAt: new Date().toISOString(),
     registry: registryInfo()?.address ?? null,
     batch: { id: batch.id, source: batch.source, policyId: batch.policy_id, status: batch.status, closeHash: batch.close_hash, sealTx: batch.anchor_tx },
+    rules: { travelRuleMin: rules.travelMin, travelRuleKrw: rules.travelKrw, krwPerUsdt: rules.krwPerUsdt, contactWaitHours: rules.waitSec / 3600 },
     policies,
     rows: batchRows(batchId).map((r) => ({
       line: r.line, sender: r.sender, recipient: r.name, receiver: r.receiver, amount: r.amount, note: r.note,
       flags: JSON.parse(r.flags), decision: r.decision, state: r.state, reason: r.reason,
       nonce: r.nonce, maxFee: r.max_fee, requestId: requestIdOf(r), traceId: r.trace_id, txnHash: r.txn_hash, fee: r.fee,
+      travel: r.travel ? JSON.parse(r.travel) : null, // Travel Rule details: in this file for the auditor, never on chain
     })),
     events: allEvents().map((e) => ({ id: e.id, body: e.body, prev: e.prev, hash: e.hash })),
   };
@@ -307,13 +436,67 @@ const csvCell = (v: unknown) => {
 };
 
 export function exportCsv(batchId: number) {
-  const head = ['line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason', 'request_id', 'trace_id', 'txn_hash', 'fee_usdt', 'flags'];
+  const head = ['line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason', 'request_id', 'trace_id', 'txn_hash', 'fee_usdt', 'flags', 'receipt_link'];
   const lines = batchRows(batchId).map((r) =>
-    [r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason, requestIdOf(r), r.trace_id, r.txn_hash, r.fee != null ? (r.fee / 1e6).toFixed(6) : '', JSON.parse(r.flags).join(' ')]
+    [r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason, requestIdOf(r), r.trace_id, r.txn_hash, r.fee != null ? (r.fee / 1e6).toFixed(6) : '', JSON.parse(r.flags).join(' '), r.decision === 'pay' ? `/r/${receiptToken(r)}` : '']
       .map(csvCell)
       .join(','),
   );
   return '﻿' + [head.join(','), ...lines].join('\n');
+}
+
+/* ---------------- family receipts & disputes ---------------- */
+
+// The family's receipt page. Public, but only reachable through the row's unguessable token.
+export function familyReceipt(token: string) {
+  const r = db.prepare('SELECT * FROM rows WHERE receipt_token = ?').get(token) as Row | undefined;
+  if (!r || r.decision !== 'pay') throw new Error('Receipt not found.');
+  const paid = db
+    .prepare(`SELECT ts_ms FROM events WHERE row_id = ? AND (type = 'ROW_RECOVERED' OR (type = 'ROW_STATE' AND body LIKE '%"state":"SUCCEED"%')) ORDER BY id DESC LIMIT 1`)
+    .get(r.id) as { ts_ms: number } | undefined;
+  const status = r.state === 'SUCCEED' ? 'paid' : r.state === 'REFUSED' || r.state === 'FAILED' ? 'not_sent' : 'on_the_way';
+  return {
+    status, sender: r.sender, name: r.name, amount: r.amount, note: r.note, wallet: r.receiver,
+    country: payeeBook().find((p) => p.address === r.receiver)?.country ?? null,
+    txnHash: status === 'paid' ? r.txn_hash : null, paidAt: paid?.ts_ms ?? null,
+  };
+}
+
+const rowEvents = (rowId: number) =>
+  (db.prepare('SELECT id, ts_ms, type, body FROM events WHERE row_id = ? ORDER BY id').all(rowId) as { id: number; ts_ms: number; type: string; body: string }[])
+    .map((e) => ({ id: e.id, ts: e.ts_ms, type: e.type, data: JSON.parse(e.body).data }));
+
+// "My family did not get the money": find the payments by sender, recipient, note, wallet or transaction hash.
+export function findPayments(q: string) {
+  const s = q.trim();
+  if (s.length < 2) throw new Error('Type at least two characters.');
+  const like = `%${s}%`;
+  const rows = db
+    .prepare(
+      `SELECT r.*, b.created_at AS batch_created FROM rows r JOIN batches b ON b.id = r.batch_id
+       WHERE r.sender LIKE ? OR r.name LIKE ? OR r.note LIKE ? OR r.receiver = ? OR r.txn_hash = ?
+       ORDER BY r.id DESC LIMIT 20`,
+    )
+    .all(like, like, like, s, s) as (Row & { batch_created: number })[];
+  return rows.map((r) => ({
+    id: r.id, batchId: r.batch_id, batchCreated: r.batch_created, line: r.line, sender: r.sender, name: r.name, receiver: r.receiver,
+    amount: r.amount, note: r.note, flags: JSON.parse(r.flags) as string[], decision: r.decision, state: r.state, reason: r.reason,
+    txnHash: r.txn_hash, fee: r.fee, receiptToken: r.receipt_token, events: rowEvents(r.id),
+  }));
+}
+
+export async function askDispute(q: string, question: string) {
+  if (!kilnConfigured()) throw new Error('Kiln is not configured. Set KILN_BASE_URL and KILN_API_KEY.');
+  const payments = findPayments(q);
+  const chain = await Promise.all(
+    payments.filter((p) => p.txnHash).slice(0, 5).map(async (p) => ({ txnHash: p.txnHash, chain: await usdtTransferProof(p.txnHash!).catch(() => null) })),
+  );
+  const input = {
+    question,
+    payments: payments.map((p) => ({ ...p, receiptToken: undefined, amountUSDT: (p.amount ?? 0) / 1e6, feeUSDT: p.fee != null ? p.fee / 1e6 : null })),
+    chain,
+  };
+  return ask<{ ko: string; en: string }>('dispute', PROMPTS.dispute, input, { maxTokens: 900 });
 }
 
 // Energy upper bound per output token: 2 RNGD cards × 180 W × 5.8 ms (FuriosaAI's published figures).
@@ -335,6 +518,7 @@ export function metrics() {
 }
 
 export function status() {
+  const rules = screenRules();
   let payer: string | null = null;
   try {
     payer = payerAddress();
@@ -349,6 +533,8 @@ export function status() {
     notary: !!process.env.NOTARY_PRIVATE_KEY,
     registry: registryInfo()?.address ?? null,
     simulateLostLine: process.env.SIMULATE_LOST_RESPONSE_LINE ? Number(process.env.SIMULATE_LOST_RESPONSE_LINE) : null,
-    payees: payeeBook(),
+    telegram: telegramConfigured(),
+    rules: { contactWaitHours: rules.waitSec / 3600, travelRuleMin: rules.travelMin, travelRuleKrw: rules.travelKrw, krwPerUsdt: rules.krwPerUsdt },
+    payees: payeeBook().map((p) => ({ ...p, month: payeeMonth(p.address) })),
   };
 }

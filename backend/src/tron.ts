@@ -102,4 +102,22 @@ export async function findUsdtTransfer(from: string, to: string, value: number, 
   return hit?.transaction_id ?? null;
 }
 
+const TRANSFER_TOPIC = 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// What the chain says about a USDT transaction: whether it succeeded, when, and every USDT transfer in it
+// (the payment itself and GasFree's fee).
+export async function usdtTransferProof(txid: string) {
+  const info: any = await tw.trx.getTransactionInfo(txid);
+  if (!info?.id) return { found: false as const };
+  const usdtHex = tw.address.toHex(NILE_USDT).slice(2).toLowerCase();
+  const transfers = (info.log ?? [])
+    .filter((l: any) => l.address?.toLowerCase() === usdtHex && l.topics?.[0] === TRANSFER_TOPIC)
+    .map((l: any) => ({
+      from: tw.address.fromHex('41' + l.topics[1].slice(-40)),
+      to: tw.address.fromHex('41' + l.topics[2].slice(-40)),
+      value: Number(BigInt('0x' + l.data)),
+    }));
+  return { found: true as const, success: info.receipt?.result === 'SUCCESS', block: info.blockNumber as number, time: info.blockTimeStamp as number, transfers };
+}
+
 export const tronscanTx = (hash: string) => `https://nile.tronscan.org/#/transaction/${hash}`;

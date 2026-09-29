@@ -7,10 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { db, activePolicy, getBatch } from './db';
-import { startRun, isRunning, recoverBatch, precheck, committed } from './orchestrator';
+import { isRunning, recoverBatch, precheck, committed } from './orchestrator';
+import { sendTelegram } from './alerts';
+import { usdtTransferProof } from './tron';
 import {
   draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
-  batchView, evidence, exportCsv, metrics, status,
+  batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
+  familyReceipt, findPayments, askDispute,
 } from './desk';
 
 const app = new Hono().basePath('/api');
@@ -79,8 +82,14 @@ app.post('/batches/:id/:action', async (c) => {
       return c.json(await reviewFlags(batchId));
     case 'precheck':
       return c.json(await precheck(batchId));
+    case 'recheck':
+      return c.json(await recheck(batchId));
+    case 'approval-draft':
+      return c.json(approvalDraft(batchId));
+    case 'approve':
+      return c.json(await approveBatch(batchId, await c.req.json()));
     case 'run':
-      startRun(batchId);
+      await payBatch(batchId);
       return c.json({ started: true });
     case 'recover':
       await recoverBatch(batchId);
@@ -129,6 +138,25 @@ app.get('/batches/:id/export', (c) => {
 });
 
 app.get('/metrics', (c) => c.json(metrics()));
+
+// The family's receipt. The frontend lets this path through without the site password; the token is the key.
+app.get('/receipts/:token', (c) => c.json(familyReceipt(c.req.param('token'))));
+
+app.get('/disputes', (c) => c.json(findPayments(c.req.query('q') ?? '')));
+app.post('/disputes/ask', async (c) => {
+  const { q, question } = await c.req.json();
+  return c.json(await askDispute(String(q ?? ''), String(question ?? '').slice(0, 500)));
+});
+app.get('/chain/:txid', async (c) => {
+  const txid = c.req.param('txid');
+  if (!/^[0-9a-f]{64}$/i.test(txid)) throw new Error('Not a transaction hash.');
+  return c.json(await usdtTransferProof(txid));
+});
+
+app.post('/alerts/test', async (c) => {
+  await sendTelegram('Ansim test alert. Refusals, stops, failures, new contacts and finished batches will arrive here.');
+  return c.json({ ok: true });
+});
 
 const port = Number(process.env.PORT ?? 4000);
 serve({ fetch: app.fetch, port }, () => console.log(`Ansim backend on http://localhost:${port}/api`));

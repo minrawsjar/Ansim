@@ -1,7 +1,7 @@
 import { db, getBatch, getPolicy, getRow, batchRows, updateRow, nowSec, activePolicy, type Row } from './db';
 import { logEvent } from './log';
 import { gasfree, gasfreeConfig, signPermit, GasFreeRejected, type Permit, type GasFreeTransfer } from './gasfree';
-import { refuseReason } from './policy';
+import { refuseReason, MONTH_SEC } from './policy';
 import { addressFromKey, findUsdtTransfer, recordBatchSeal, usdtBalance } from './tron';
 
 const IN_FLIGHT = ['SIGNED', 'SUBMITTED', 'WAITING', 'INPROGRESS', 'CONFIRMING', 'UNKNOWN'];
@@ -28,6 +28,15 @@ export function committed(policyId: number): number {
     )
     .get(policyId) as { c: number };
   return r.c;
+}
+
+// What this receiver got, or has in flight, in the last 30 days, under any policy and batch.
+export function payeeMonth(receiver: string): number {
+  const states = ['SUCCEED', ...IN_FLIGHT].map((s) => `'${s}'`).join(', ');
+  const r = db
+    .prepare(`SELECT COALESCE(SUM(amount), 0) AS m FROM rows WHERE receiver = ? AND state IN (${states}) AND signed_at_ms >= ?`)
+    .get(receiver, Date.now() - MONTH_SEC * 1000) as { m: number };
+  return r.m;
 }
 
 export async function precheck(batchId: number) {
@@ -122,8 +131,9 @@ async function payRow(row: Row) {
     const maxFee = Number(token.transferFee) + (acct.active ? 0 : Number(token.activateFee));
     const value = row.amount ?? 0;
     const c = committed(policy.id);
-    const facts = { policyId: policy.id, line: row.line, receiver: row.receiver, value, maxFee, committed: c };
-    const reason = refuseReason(policy, c, row.receiver, value, maxFee);
+    const month = payeeMonth(row.receiver);
+    const facts = { policyId: policy.id, line: row.line, receiver: row.receiver, value, maxFee, committed: c, payeeMonth: month };
+    const reason = refuseReason(policy, c, row.receiver, value, maxFee, Date.now() / 1000, month);
     if (reason) {
       updateRow(row.id, { state: 'REFUSED', reason });
       logEvent('ROW_REFUSED', { ...facts, reason }, row.batch_id, row.id);
@@ -158,7 +168,7 @@ async function submit(row: Row, resend: boolean) {
   if (!resend && policy.status === 'STOPPED') {
     // Signed a moment before the owner pressed Stop, but never sent. Drop it.
     updateRow(row.id, { state: 'REFUSED', reason: 'STOPPED_BY_OWNER', permit: null });
-    logEvent('ROW_REFUSED', { policyId: policy.id, line: row.line, receiver: row.receiver, value: row.amount, maxFee: row.max_fee, committed: committed(policy.id), reason: 'STOPPED_BY_OWNER', signedButNeverSent: true }, row.batch_id, row.id);
+    logEvent('ROW_REFUSED', { policyId: policy.id, line: row.line, receiver: row.receiver, value: row.amount, maxFee: row.max_fee, committed: committed(policy.id), payeeMonth: payeeMonth(row.receiver), reason: 'STOPPED_BY_OWNER', signedButNeverSent: true }, row.batch_id, row.id);
     return;
   }
   try {

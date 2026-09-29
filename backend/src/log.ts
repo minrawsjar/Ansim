@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from './db';
+import { alertFor } from './alerts';
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 export const GENESIS = '0'.repeat(64);
@@ -15,6 +16,7 @@ export function logEvent(type: string, data: Record<string, unknown>, batchId: n
   const r = db
     .prepare('INSERT INTO events (ts_ms, type, batch_id, row_id, body, prev, hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ts, type, batchId, rowId, body, prev, hash);
+  alertFor(type, data, batchId);
   return { id: Number(r.lastInsertRowid), hash };
 }
 

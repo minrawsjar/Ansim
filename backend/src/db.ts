@@ -84,12 +84,14 @@ export type Policy = {
   payees: string; payees_hash: string; deadline: number; policy_nonce: number;
   signature: string | null; signed_by: string | null; policy_hash: string | null; anchor_tx: string | null;
   status: 'DRAFT' | 'ACTIVE' | 'STOPPED' | 'REPLACED'; created_at: number;
+  per_payee_monthly: number | null; // null on policies signed before the monthly cap existed
 };
 
 export type Batch = {
   id: number; policy_id: number | null; source: string; columns: string; mapped_by: string;
   status: 'REVIEW' | 'RUNNING' | 'PAUSED' | 'CLOSED'; receipt: string | null;
   close_hash: string | null; anchor_tx: string | null; created_at: number;
+  approval: string | null;
 };
 
 export type Row = {
@@ -100,6 +102,7 @@ export type Row = {
   permit: string | null; nonce: number | null; deadline: number | null; max_fee: number | null;
   trace_id: string | null; txn_hash: string | null; fee: number | null; error: string | null;
   signed_at_ms: number | null; updated_at_ms: number | null;
+  receipt_token: string | null; travel: string | null;
 };
 
 function open() {
@@ -108,6 +111,15 @@ function open() {
   const d = new Database(file);
   d.pragma('journal_mode = WAL');
   d.exec(SCHEMA);
+  // Columns added after the first release. CREATE TABLE IF NOT EXISTS does not add them to an old file.
+  const addColumn = (table: string, column: string, type: string) => {
+    const cols = d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  };
+  addColumn('policies', 'per_payee_monthly', 'INTEGER');
+  addColumn('batches', 'approval', 'TEXT');
+  addColumn('rows', 'receipt_token', 'TEXT');
+  addColumn('rows', 'travel', 'TEXT');
   return d;
 }
 

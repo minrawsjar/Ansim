@@ -87,13 +87,38 @@ if (closed) {
   } else info('Batch was not sealed on chain');
 } else info('Batch is not closed yet');
 
-/* 4. Every payment matches its signed record, the chain and the policy. Every refusal was required. */
-function refuseReason(p, committed, to, value, maxFee, now) {
+/* 4. The owner approved exactly the rows that were paid, before the first one was signed. */
+const APPROVAL_TYPES = { BatchApproval: [
+  { name: 'batchId', type: 'uint256' }, { name: 'policyId', type: 'uint256' }, { name: 'rowsHash', type: 'bytes32' },
+  { name: 'count', type: 'uint256' }, { name: 'total', type: 'uint256' }] };
+const rowsHash = (rows) => '0x' + sha([...rows].sort((a, b) => a.line - b.line).map((r) => `${r.line}:${r.receiver}:${r.amount}`).join(','));
+const firstSigned = events.find((e) => e.type === 'ROW_SIGNED' && e.batch === ev.batch.id);
+const approval = events.filter((e) => e.type === 'BATCH_APPROVED' && e.batch === ev.batch.id && (!firstSigned || e.id < firstSigned.id)).at(-1);
+if (!approval && !firstSigned) info('No payment signed yet, and the owner has not approved the batch yet');
+else if (!approval) check(false, 'The owner approved the batch before the first payment was signed');
+else {
+  const a = approval.data;
+  const p = policies.get(a.policyId);
+  const value = { batchId: String(ev.batch.id), policyId: String(a.policyId), rowsHash: a.rowsHash, count: String(a.count), total: String(a.total) };
+  let ok = false;
+  try {
+    ok = !!p && a.owner === p.owner && (await tw.trx.verifyTypedData(p.domain, APPROVAL_TYPES, value, a.signature, a.owner));
+  } catch {
+    ok = false;
+  }
+  check(ok, 'The policy owner signed the batch approval before the first payment', `${a.count} rows, ${usdt(a.total)} USDT, ${a.signedBy}`);
+  const pay = ev.rows.filter((r) => r.decision === 'pay');
+  check(rowsHash(pay) === a.rowsHash && pay.length === a.count, 'The rows marked to pay are exactly the rows the owner approved');
+}
+
+/* 5. Every payment matches its signed record, the chain and the policy. Every refusal was required. */
+function refuseReason(p, committed, to, value, maxFee, now, payeeMonth) {
   if (p.status === 'STOPPED') return 'STOPPED_BY_OWNER';
   if (p.status !== 'ACTIVE') return 'NO_ACTIVE_POLICY';
   if (now > p.deadline) return 'DEADLINE_PASSED';
   if (!p.payees.includes(to)) return 'PAYEE_NOT_ALLOWED';
   if (value > p.perPayment) return 'OVER_PER_PAYMENT_CAP';
+  if (p.perPayeeMonthly && payeeMonth + value > p.perPayeeMonthly) return 'OVER_MONTHLY_PAYEE_CAP';
   if (committed + value + maxFee > p.budget) return 'OVER_BUDGET_WITH_FEES';
   return null;
 }
@@ -108,6 +133,9 @@ async function usdtTransfers(txid) {
 }
 
 const spent = new Map();
+const paidTo = new Map(); // receiver -> paid earlier in this batch, a lower bound for the logged 30-day total
+const waitMs = (ev.rules?.contactWaitHours ?? 0) * 3600_000;
+const travelMin = ev.rules?.travelRuleMin ? BigInt(ev.rules.travelRuleMin) : null;
 const batchEvents = events.filter((e) => e.batch === ev.batch.id);
 const lastOf = (type, line) => batchEvents.filter((e) => e.type === type && e.data.line === line).at(-1);
 
@@ -134,8 +162,16 @@ for (const r of ev.rows) {
     const payees = p.payees;
     const s = (spent.get(p.id) ?? 0n) + BigInt(r.amount) + fee;
     spent.set(p.id, s);
-    const inside = payees.includes(r.receiver) && BigInt(r.amount) <= BigInt(p.value.perPayment) && t.time <= Number(p.value.deadline) && s <= BigInt(p.value.budget) && fee <= BigInt(signed.data.maxFee);
-    check(inside, `${label}: inside policy ${p.id}`, `fee ${usdt(fee)}, spent ${usdt(s)} of ${usdt(p.value.budget)}`);
+    const before = paidTo.get(r.receiver) ?? 0n;
+    paidTo.set(r.receiver, before + BigInt(r.amount));
+    const month = BigInt(signed.data.payeeMonth ?? 0);
+    const cap = BigInt(p.value.perPayeeMonthly ?? 0);
+    const monthOk = month >= before && (!cap || month + BigInt(r.amount) <= cap);
+    const inside = payees.includes(r.receiver) && BigInt(r.amount) <= BigInt(p.value.perPayment) && t.time <= Number(p.value.deadline) && s <= BigInt(p.value.budget) && fee <= BigInt(signed.data.maxFee) && monthOk;
+    check(inside, `${label}: inside policy ${p.id}`, `fee ${usdt(fee)}, spent ${usdt(s)} of ${usdt(p.value.budget)}${cap ? `, 30 days ${usdt(month + BigInt(r.amount))} of ${usdt(cap)}` : ''}`);
+    const added = events.filter((e) => e.type === 'CONTACT_ADDED' && e.data.address === r.receiver && e.id < signed.id).at(-1);
+    if (waitMs && added) check(signed.ts - added.ts >= waitMs, `${label}: the new contact's waiting period had passed`, `added ${new Date(added.ts).toISOString()}`);
+    if (travelMin !== null && BigInt(r.amount) >= travelMin) check(!!(r.travel?.originatorId && r.travel?.purpose), `${label}: Travel Rule details were recorded`, `threshold ${usdt(travelMin)} USDT`);
   } else if (r.state === 'REFUSED') {
     const e = lastOf('ROW_REFUSED', r.line);
     const p = e && policies.get(e.data.policyId);
@@ -146,8 +182,8 @@ for (const r of ev.rows) {
     const stopped = events.some((x) => x.type === 'POLICY_STOPPED' && x.data.policyId === p.id && x.id < e.id);
     const replaced = events.some((x) => x.type === 'POLICY_ACTIVATED' && x.data.policyId > p.id && x.id < e.id);
     const expect = refuseReason(
-      { status: stopped ? 'STOPPED' : replaced ? 'REPLACED' : 'ACTIVE', deadline: Number(p.value.deadline), payees: p.payees, perPayment: Number(p.value.perPayment), budget: Number(p.value.budget) },
-      e.data.committed, e.data.receiver, e.data.value, e.data.maxFee, e.ts / 1000,
+      { status: stopped ? 'STOPPED' : replaced ? 'REPLACED' : 'ACTIVE', deadline: Number(p.value.deadline), payees: p.payees, perPayment: Number(p.value.perPayment), budget: Number(p.value.budget), perPayeeMonthly: Number(p.value.perPayeeMonthly ?? 0) },
+      e.data.committed, e.data.receiver, e.data.value, e.data.maxFee, e.ts / 1000, e.data.payeeMonth ?? 0,
     );
     check(expect === e.data.reason && r.reason === e.data.reason && e.data.receiver === r.receiver, `${label}: refusal was required by policy ${p.id}`, e.data.reason);
   } else {
