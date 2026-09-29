@@ -81,32 +81,31 @@ npm run reset                               # clear the local database before a 
 
 ## Public deployment
 
-The console runs on Vercel. The backend stays on the demo laptop, because it holds the payer key and the event log, and Vercel reaches it through a tunnel. Two locks protect it:
+The console runs on Vercel and the backend runs on Railway. The backend holds the payer key and the event log, so two locks protect it:
 
-- **Backend key.** `BACKEND_KEY` is set in both `backend/.env.local` and `frontend/.env.local`. The backend refuses any request without it, and the console's proxy adds it.
-- **Site password.** With `SITE_PASSWORD` set, the browser asks for it before showing anything.
+- **Backend key.** With `BACKEND_KEY` set, the backend refuses every request without it except `/api/health`. The console's proxy adds the key.
+- **Site password.** With `SITE_PASSWORD` set on Vercel, the browser asks for it before showing anything.
 
-1. Start the backend and open a tunnel to it:
+**Backend on Railway.** Project `ansim`, service `ansim-backend`, live at `https://ansim-backend-production.up.railway.app`.
 
-   ```bash
-   npm run dev
-   ```
+- It builds from `backend/Dockerfile`, selected by the service variable `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile`.
+- The database lives on a volume mounted at `/data`, set by `ANSIM_DB=/data/ansim-live.db`.
+- The service has the same variables as `backend/.env.local`, including `BACKEND_KEY`.
+- The service is not connected to GitHub, so redeploy from the repository root after backend changes:
 
-   ```bash
-   cloudflared tunnel --url http://localhost:4000
-   ```
+  ```bash
+  railway up --detach -s ansim-backend
+  ```
 
-2. In the Vercel project, set the root directory to `frontend` and add three environment variables, then redeploy:
+**Console on Vercel.** Set the root directory to `frontend`, add these variables, then redeploy:
 
-   | Variable | Value |
-   |---|---|
-   | `BACKEND_URL` | the `https://…trycloudflare.com` address the tunnel printed |
-   | `BACKEND_KEY` | the same value as in `backend/.env.local` |
-   | `SITE_PASSWORD` | a password to give the judges |
+| Variable | Value |
+|---|---|
+| `BACKEND_URL` | `https://ansim-backend-production.up.railway.app` |
+| `BACKEND_KEY` | the same value as in `backend/.env.local` |
+| `SITE_PASSWORD` | a password to give the judges |
 
-3. For the custom domain, add `ansim.qd.je` under the project's Domains settings. Then add the A record Vercel shows, usually `76.76.21.21` with the name `@`, in the DigitalPlat DNS records for `ansim.qd.je`.
-
-A quick tunnel gets a new address each time it starts, so update `BACKEND_URL` and redeploy after a restart.
+**Custom domain.** Names under `qd.je` can't be verified on Vercel, because Vercel asks for a record in DigitalPlat's parent zone. Add a free `vercel.app` name under Domains instead.
 
 ## Live on Nile
 
