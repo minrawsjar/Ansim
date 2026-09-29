@@ -236,7 +236,7 @@ function PrecheckPanel({ p }: { p: Precheck }) {
         <Stat label="Amount" value={usdt(p.amount)} />
         <Stat label="Transfer fees" value={usdt(p.transferFees)} />
         <Stat label="Activation fee" value={usdt(p.activation)} />
-        <Stat label="Total" value={usdt(p.total)} tone={p.total > p.balance - p.frozen ? 'stop' : 'ok'} />
+        <Stat label="Total" value={usdt(p.total)} tone={p.problems.length ? 'stop' : 'ok'} />
         <Stat label="Budget left" value={usdt(p.remaining)} tone={p.total > p.remaining ? 'warn' : undefined} />
       </div>
       <dl className="grid gap-x-6 gap-y-2 border-t border-line pt-4 text-[13px] sm:grid-cols-[auto_1fr]">
@@ -244,8 +244,14 @@ function PrecheckPanel({ p }: { p: Precheck }) {
         <dd><Addr a={p.payer} full /></dd>
         <dt className="text-muted">GasFree address</dt>
         <dd className="flex flex-wrap items-center gap-2"><Addr a={p.gasFreeAddress} full /><Copy text={p.gasFreeAddress} /><span className="text-xs text-muted">send test USDT here</span></dd>
-        <dt className="text-muted">Balance</dt>
-        <dd className="num font-mono">{usdt(p.balance)} {p.token.symbol}{p.frozen ? ` · ${usdt(p.frozen)} pending` : ''}</dd>
+        {p.vaultBalance != null && (
+          <>
+            <dt className="text-muted">Vault</dt>
+            <dd className="num font-mono">{usdt(p.vaultBalance)} {p.token.symbol} <span className="font-sans text-xs text-muted">released to the GasFree account when you press Pay</span></dd>
+          </>
+        )}
+        <dt className="text-muted">GasFree balance</dt>
+        <dd className="num font-mono">{usdt(p.balance)} {p.token.symbol}{p.frozen ? ` · ${usdt(p.frozen)} set aside for a payment in flight` : ''}</dd>
         <dt className="text-muted">Token</dt>
         <dd>{p.token.symbol} <Addr a={p.token.address} /> · fee {usdt(p.token.transferFee)} per transfer, {usdt(p.token.activateFee)} once to activate</dd>
         <dt className="text-muted">Account</dt>
@@ -354,7 +360,7 @@ export default function BatchPage() {
       <div className="flex flex-wrap items-center gap-2">
         {review && <Button kind="secondary" busy={busy === 'review'} disabled={!flagged} onClick={() => act('review')}>Explain {flagged} flagged rows with AI ↗</Button>}
         {review && <Button kind="quiet" busy={busy === 'recheck'} onClick={() => act('recheck')}>Run checks again</Button>}
-        {batch.status !== 'CLOSED' && <Button kind="secondary" busy={busy === 'precheck'} onClick={() => act<Precheck>('precheck', {}, setPre)}>Pre-check balance and fees</Button>}
+        {batch.status !== 'CLOSED' && !live && <Button kind="secondary" busy={busy === 'precheck'} onClick={() => act<Precheck>('precheck', {}, setPre)}>Pre-check balance and fees</Button>}
         {(review || batch.status === 'PAUSED') && !live && (
           <Button kind="primary" busy={busy === 'run'} disabled={summary.ready + summary.awaiting === 0 || !!view.approvalProblem} title={view.approvalProblem ?? undefined} onClick={() => act('run')}>
             Pay {summary.ready + summary.awaiting} rows →

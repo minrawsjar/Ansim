@@ -94,6 +94,17 @@ const cityFromPhone = () =>
     );
   });
 
+// The family's language first, with English under it, so a helper or the sender can read it too.
+function Both({ w, pick }: { w: Words; pick: (x: Words) => string }) {
+  if (w === LANG.en) return <>{pick(w)}</>;
+  return (
+    <span className="grid gap-0.5">
+      <span lang={w.locale}>{pick(w)}</span>
+      <span lang="en" className="text-[0.85em] opacity-70">{pick(LANG.en)}</span>
+    </span>
+  );
+}
+
 function Confirm({ w, token, onDone }: { w: Words; token: string; onDone: (r: Receipt) => void }) {
   const [share, setShare] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -105,11 +116,11 @@ function Confirm({ w, token, onDone }: { w: Words; token: string; onDone: (r: Re
   return (
     <div lang={w.locale} className="grid gap-3 border-t border-line pt-5">
       <button type="button" onClick={send} disabled={busy} className="rounded-[7px] border border-celadon bg-celadon px-4 py-3 text-sm font-semibold text-on-celadon disabled:opacity-60">
-        {busy ? '…' : `✓ ${w.confirm}`}
+        {busy ? '…' : <span className="flex items-start justify-center gap-1.5">✓ <Both w={w} pick={(x) => x.confirm} /></span>}
       </button>
-      <label className="flex items-center gap-2 text-[12px] text-muted">
-        <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
-        {w.shareCity}
+      <label className="flex items-start gap-2 text-[12px] text-muted">
+        <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} className="mt-0.5" />
+        <Both w={w} pick={(x) => x.shareCity} />
       </label>
     </div>
   );
@@ -143,8 +154,8 @@ export default function FamilyReceipt() {
           <Block w={LANG[lang]} r={r} big />
           {r.status === 'paid' && !r.ack && <Confirm w={LANG[lang]} token={token} onDone={setR} />}
           {r.ack && (
-            <p lang={LANG[lang].locale} className="border-t border-line pt-5 text-[13px] text-celadon">
-              ✓ {LANG[lang].thanks}{r.ack.city ? ` · ${r.ack.city}` : ''}
+            <p className="flex items-start gap-1.5 border-t border-line pt-5 text-[13px] text-celadon">
+              ✓ <Both w={LANG[lang]} pick={(x) => `${x.thanks}${r.ack?.city ? ` · ${r.ack.city}` : ''}`} />
             </p>
           )}
           <div className="border-t border-line pt-5"><Block w={LANG.ko} r={r} /></div>
@@ -157,7 +168,7 @@ export default function FamilyReceipt() {
               rel="noopener"
               className="rounded-[7px] border border-line px-4 py-3 text-center text-[13px] text-[#c8d1c7] hover:bg-raised"
             >
-              {LANG[lang].telegram} ↗
+              <Both w={LANG[lang]} pick={(x) => `${x.telegram} ↗`} />
             </a>
           )}
           <p className="border-t border-line pt-4 font-mono text-[11px] break-all text-muted">{r.wallet}</p>

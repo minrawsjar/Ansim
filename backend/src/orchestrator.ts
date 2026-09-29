@@ -2,7 +2,7 @@ import { db, getBatch, getPolicy, getRow, batchRows, updateRow, nowSec, activePo
 import { logEvent } from './log';
 import { gasfree, gasfreeConfig, signPermit, GasFreeRejected, type Permit, type GasFreeTransfer } from './gasfree';
 import { refuseReason, MONTH_SEC } from './policy';
-import { addressFromKey, findUsdtTransfer, recordBatchSeal, usdtBalance } from './tron';
+import { addressFromKey, findUsdtTransfer, recordBatchSeal, usdtBalance, vaultInfo, vaultState } from './tron';
 
 const IN_FLIGHT = ['SIGNED', 'SUBMITTED', 'WAITING', 'INPROGRESS', 'CONFIRMING', 'UNKNOWN'];
 const DONE = new Set(['SUCCEED', 'FAILED', 'REFUSED']);
@@ -40,7 +40,9 @@ export function payeeMonth(receiver: string): number {
 }
 
 export async function precheck(batchId: number) {
-  const rows = batchRows(batchId).filter((r) => r.decision === 'pay' && !DONE.has(r.state));
+  // Only rows not yet signed: a payment already in flight has its money set aside by GasFree.
+  const rows = batchRows(batchId).filter((r) => r.decision === 'pay' && r.state === 'READY');
+  const inFlight = batchRows(batchId).some((r) => r.decision === 'pay' && IN_FLIGHT.includes(r.state));
   const policy = activePolicy();
   const payer = payerAddress();
   const [{ token, provider }, acct] = await Promise.all([gasfreeConfig(), gasfree.account(payer)]);
@@ -54,14 +56,24 @@ export async function precheck(batchId: number) {
   const problems: string[] = [];
   const warnings: string[] = [];
   if (!policy || policy.status !== 'ACTIVE') problems.push('There is no active signed policy.');
-  if (!acct.allowSubmit) problems.push('GasFree does not accept transfers from this account right now.');
-  if (balance - frozen < total) problems.push('The GasFree address holds less USDT than the batch total. Send test USDT to it first.');
+  // GasFree allows one pending transfer per account, so it says no while a payment is in flight.
+  if (!acct.allowSubmit && inFlight) warnings.push('A payment is in flight. GasFree takes one transfer at a time, so the next one waits for it.');
+  else if (!acct.allowSubmit) problems.push('GasFree does not accept transfers from this account right now.');
+  // With the vault, the GasFree account is filled when Pay is pressed, so the vault's balance is what counts.
+  const v = vaultInfo() ? await vaultState().catch(() => null) : null;
+  const available = balance - frozen + (v && !v.frozen ? v.balance : 0);
+  if (total > 0 && available < total) {
+    problems.push(v ? 'The vault and the GasFree account together hold less USDT than this batch needs. Top up the vault first.' : 'The GasFree address holds less USDT than the batch total. Send test USDT to it first.');
+  } else if (v && total > 0 && balance - frozen < total) {
+    warnings.push(`The vault holds ${(v.balance / 1e6).toFixed(2)} USDT and releases this batch's money when you press Pay.`);
+  }
+  if (v?.frozen) problems.push('The owner has frozen the vault, so it cannot release money for this batch.');
   if (policy && total > remaining) warnings.push('The batch total is above the remaining budget. The policy will refuse the rows that do not fit.');
   return {
     payer, gasFreeAddress: acct.gasFreeAddress, active: acct.active, allowSubmit: acct.allowSubmit, nonce: acct.nonce,
     token: { symbol: token.symbol, address: token.tokenAddress, transferFee: Number(token.transferFee), activateFee: Number(token.activateFee), decimal: token.decimal },
     provider: { address: provider.address, name: provider.name, maxPendingTransfer: provider.config?.maxPendingTransfer },
-    balance, frozen, count: rows.length, amount, transferFees, activation, total,
+    balance, frozen, count: rows.length, amount, transferFees, activation, total, vaultBalance: v?.balance ?? null,
     budget: policy?.budget ?? 0, remaining, problems, warnings,
   };
 }

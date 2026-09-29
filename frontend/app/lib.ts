@@ -44,7 +44,7 @@ export type Precheck = {
   payer: string; gasFreeAddress: string; active: boolean; allowSubmit: boolean; nonce: number;
   token: { symbol: string; address: string; transferFee: number; activateFee: number };
   provider: { address: string; name: string; maxPendingTransfer?: number };
-  balance: number; frozen: number; count: number; amount: number; transferFees: number; activation: number; total: number;
+  balance: number; frozen: number; count: number; amount: number; transferFees: number; activation: number; total: number; vaultBalance: number | null;
   budget: number; remaining: number; problems: string[]; warnings: string[];
 };
 
