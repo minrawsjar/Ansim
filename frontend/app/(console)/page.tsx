@@ -77,7 +77,10 @@ function TestAlert() {
 function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
   const signed: string[] = policy ? JSON.parse(policy.payees) : [];
   const active = policy?.status === 'ACTIVE';
-  const [selected, setSelected] = useState<string[]>(() => (active ? signed : status.payees.map((p) => p.address)));
+  // Start from the signed wallets that are still contacts, so removed contacts show up as unsigned changes.
+  const [selected, setSelected] = useState<string[]>(() =>
+    active ? signed.filter((a) => status.payees.some((p) => p.address === a)) : status.payees.map((p) => p.address),
+  );
   const changes = active ? [...new Set([...selected, ...signed])].filter((a) => selected.includes(a) !== signed.includes(a)).length : 0;
   return (
     <div className="grid min-w-0 gap-[18px]">
@@ -174,7 +177,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
   return (
     <Card
       id="contacts"
-      eyebrow={`Step 1 · payee book · ${selected.length} of ${payees.length} allowed`}
+      eyebrow={`Step 1 · payee book · ${payees.filter((p) => selected.includes(p.address)).length} of ${payees.length} ticked`}
       title="Contacts"
       action={!adding && <Button kind="secondary" onClick={() => setAdding(true)}>+ Add contact</Button>}
     >

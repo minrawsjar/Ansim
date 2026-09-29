@@ -297,6 +297,8 @@ export async function planBatch(instruction: string) {
   const allowed: string[] = policy?.status === 'ACTIVE' ? JSON.parse(policy.payees) : [];
   const rules = screenRules();
   const contacts = payeeBook();
+  if (!policy || policy.status !== 'ACTIVE') throw new Error('Sign the payment limits first. The agent only drafts payments the owner’s limits allow.');
+  if (!contacts.some((c) => allowed.includes(c.address))) throw new Error('The signed limits allow none of your current contacts. Tick the contacts, sign new limits, then ask again.');
   const lastSender = db.prepare("SELECT sender FROM rows WHERE receiver = ? AND sender IS NOT NULL AND sender != '' ORDER BY id DESC LIMIT 1");
   const input = {
     today: new Date().toISOString().slice(0, 10),
