@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { db, activePolicy, getBatch } from './db';
-import { isRunning, recoverBatch, precheck, committed } from './orchestrator';
+import { isRunning, recoverBatch, precheck, committed, resumeRuns } from './orchestrator';
 import { sendTelegram, telegramConfigured } from './alerts';
 import { handleUpdate, ownerLink, ownerChatCount, botUsername, registerWebhook, webhookSecret } from './telegram';
 import { usdtTransferProof } from './tron';
@@ -185,4 +185,5 @@ const port = Number(process.env.PORT ?? 4000);
 serve({ fetch: app.fetch, port }, () => {
   console.log(`Ansim backend on http://localhost:${port}/api`);
   registerWebhook().catch(() => {});
+  resumeRuns();
 });

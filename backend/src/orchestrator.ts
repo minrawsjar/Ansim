@@ -92,13 +92,36 @@ export function startRun(batchId: number) {
   if (!batch || batch.status === 'CLOSED') throw new Error('This batch is already closed.');
   db.prepare("UPDATE batches SET status = 'RUNNING', policy_id = ? WHERE id = ?").run(policy.id, batchId);
   logEvent('BATCH_STARTED', { policyId: policy.id }, batchId);
+  launch(batchId, () => runBatch(batchId));
+}
+
+function launch(batchId: number, work: () => Promise<void>) {
   running.add(batchId);
-  runBatch(batchId)
+  work()
     .catch((e) => {
       db.prepare("UPDATE batches SET status = 'PAUSED' WHERE id = ?").run(batchId);
       logEvent('BATCH_PAUSED', { reason: msg(e) }, batchId);
     })
     .finally(() => running.delete(batchId));
+}
+
+// A deploy or crash kills the process mid-batch, leaving it RUNNING with nothing paying it. On startup, settle
+// every in-flight row the never-pay-twice way (a row may have been signed and sent but not yet recorded), then
+// pay the rest. Every row still goes through the policy gate, so a stop or passed deadline is respected.
+export function resumeRuns() {
+  for (const { id } of db.prepare("SELECT id FROM batches WHERE status = 'RUNNING'").all() as { id: number }[]) {
+    logEvent('BATCH_RESUMED', { reason: 'The server restarted while this batch was paying' }, id);
+    launch(id, async () => {
+      for (const r of batchRows(id).filter((x) => x.decision === 'pay' && IN_FLIGHT.includes(x.state))) {
+        if (!(await recoverRow(r, true))) {
+          db.prepare("UPDATE batches SET status = 'PAUSED' WHERE id = ?").run(id);
+          logEvent('BATCH_PAUSED', { line: r.line, reason: 'Payment outcome still unknown. Press Recover later.' }, id);
+          return;
+        }
+      }
+      await runBatch(id);
+    });
+  }
 }
 
 async function runBatch(batchId: number) {
