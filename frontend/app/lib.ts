@@ -52,6 +52,12 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
 
 export const usdt = (n: number | null | undefined) => (n == null ? '–' : (n / 1e6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 export const when = (sec: number) => new Date(sec * 1000).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+// 3 → "3 hours", 0.05 → "3 minutes".
+export function waitText(hours: number) {
+  const [n, unit] = hours >= 1 ? [+hours.toFixed(1), 'hour'] : [Math.round(hours * 60), 'minute'];
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
 export const tronscanTx = (h: string) => `https://nile.tronscan.org/#/transaction/${h}`;
 
 // Average cost of sending money from Korea to Vietnam through banks and remittance firms (Spark, see README).

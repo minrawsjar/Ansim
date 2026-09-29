@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, usdt, when, signWithTronLink, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft } from '../lib';
+import { api, usdt, when, waitText, signWithTronLink, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft } from '../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink } from '../ui';
 
 type Draft = TypedDraft & { id: number };
@@ -204,7 +204,9 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
         )}
         {orphans.length > 0 && <p className="text-[11px] text-warn">{orphans.length === 1 ? '1 removed contact is' : `${orphans.length} removed contacts are`} still allowed by the signed limits until the owner signs new ones.</p>}
         <p className="text-[11px] text-muted">
-          Ticked contacts are the only wallets the next signed limits allow. A new contact can be paid only after {rules.contactWaitHours} hours, like a bank’s delayed transfer (지연이체). Adding or removing a contact is written to the log.
+          Ticked contacts are the only wallets the next signed limits allow.{' '}
+          {rules.contactWaitHours > 0 && <>A new contact can be paid only after {waitText(rules.contactWaitHours)}, like a bank’s delayed transfer (지연이체). </>}
+          Adding or removing a contact is written to the log.
         </p>
       </div>
     </Card>
