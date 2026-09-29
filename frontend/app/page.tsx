@@ -70,7 +70,141 @@ function Modebar({ s }: { s: Status }) {
   );
 }
 
-function PolicyCard({ status, policy, committed, reload }: { status: Status; policy: Policy | null; committed: number; reload: () => void }) {
+type DeskProps = { status: Status; policy: Policy | null; committed: number; reload: () => void };
+
+// Step 1 picks who may be paid; step 2 signs the limits for exactly that selection.
+function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
+  const signed: string[] = policy ? JSON.parse(policy.payees) : [];
+  const active = policy?.status === 'ACTIVE';
+  const [selected, setSelected] = useState<string[]>(() => (active ? signed : status.payees.map((p) => p.address)));
+  const changes = active ? [...new Set([...selected, ...signed])].filter((a) => selected.includes(a) !== signed.includes(a)).length : 0;
+  return (
+    <div className="grid min-w-0 gap-[18px]">
+      <Contacts payees={status.payees} signed={active ? signed : []} selected={selected} setSelected={setSelected} reload={reload} />
+      <Limits status={status} policy={policy} committed={committed} reload={reload} selected={selected} changes={changes} />
+    </div>
+  );
+}
+
+const EMPTY_CONTACT = { name: '', country: '', address: '', usual: '' };
+
+function Contacts({ payees, signed, selected, setSelected, reload }: {
+  payees: Status['payees']; signed: string[]; selected: string[];
+  setSelected: React.Dispatch<React.SetStateAction<string[]>>; reload: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState(EMPTY_CONTACT);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const field = (k: keyof typeof EMPTY_CONTACT) => ({ value: form[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value })) });
+
+  const save = async () => {
+    setBusy('add');
+    setError(null);
+    try {
+      await api('/api/payees', { json: form });
+      setSelected((s) => [...s, form.address.trim()]);
+      setForm(EMPTY_CONTACT);
+      setAdding(false);
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const remove = async (address: string) => {
+    setBusy(address);
+    setError(null);
+    try {
+      await api(`/api/payees/${address}`, { method: 'DELETE' });
+      setSelected((s) => s.filter((a) => a !== address));
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const orphans = signed.filter((a) => !payees.some((p) => p.address === a));
+
+  return (
+    <Card
+      id="contacts"
+      eyebrow={`Step 1 · payee book · ${selected.length} of ${payees.length} allowed`}
+      title="Contacts"
+      action={!adding && <Button kind="secondary" onClick={() => setAdding(true)}>+ Add contact</Button>}
+    >
+      <div className="grid gap-4">
+        <ErrorLine error={error} />
+        {adding && (
+          <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid gap-3 rounded-lg border border-[#26382c] bg-sunken p-4">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+              <label className="grid gap-2 text-[11px] text-muted">Name
+                <input id="contact-name" required autoComplete="off" placeholder="Nguyen Thi Lan" className="px-3 py-2.5 text-sm" {...field('name')} />
+              </label>
+              <label className="grid gap-2 text-[11px] text-muted">Country
+                <input id="contact-country" autoComplete="off" placeholder="Vietnam" className="px-3 py-2.5 text-sm" {...field('country')} />
+              </label>
+              <label className="grid gap-2 text-[11px] text-muted">Usual amount, USDT
+                <input id="contact-usual" type="number" min="0" step="0.01" placeholder="3.00" className="num px-3 py-2.5 font-mono text-sm" {...field('usual')} />
+              </label>
+              <label className="grid gap-2 text-[11px] text-muted sm:col-span-3">TRON wallet address
+                <input id="contact-address" required autoComplete="off" spellCheck={false} placeholder="T…" className="px-3 py-2.5 font-mono text-sm" {...field('address')} />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button kind="primary" type="submit" busy={busy === 'add'}>Save contact</Button>
+              <Button kind="quiet" type="button" onClick={() => { setAdding(false); setError(null); }}>Cancel</Button>
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted">Before saving, Ansim refuses a wallet that is invalid, looks like an existing contact’s wallet, is on the reported scam list or is frozen by Tether. The usual amount is used to flag an unusually large payment.</p>
+          </form>
+        )}
+        {payees.length === 0 ? (
+          <p className="text-xs text-muted">No contacts yet. Add the people this business pays.</p>
+        ) : (
+          <ul className="grid gap-1.5 xl:grid-cols-2">
+            {payees.map((p) => {
+              const on = selected.includes(p.address);
+              const was = signed.includes(p.address);
+              const tag = on && was ? ['SIGNED', 'text-celadon'] : on && signed.length ? ['TO ADD', 'text-warn'] : was ? ['TO REMOVE', 'text-warn'] : null;
+              return (
+                <li key={p.address} className={`flex items-center gap-3 rounded-[7px] border px-3 py-2.5 transition ${on ? 'border-[#3f5a3d] bg-celadon-soft' : 'border-line'}`}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    aria-label={`Allow payments to ${p.name}`}
+                    onChange={(e) => setSelected((s) => (e.target.checked ? [...s, p.address] : s.filter((a) => a !== p.address)))}
+                  />
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#38493b] text-xs text-celadon">{p.name[0]}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px]">{p.name} <span className="text-[11px] text-muted">{p.country}</span></span>
+                    <span className="flex flex-wrap items-center gap-x-2"><Addr a={p.address} /><span className="num font-mono text-[10px] text-muted">usual {p.usual.toFixed(2)}</span></span>
+                  </span>
+                  {tag && <span className={`font-mono text-[9px] tracking-[0.08em] whitespace-nowrap ${tag[1]}`}>{tag[0]}</span>}
+                  <button
+                    type="button"
+                    title={`Remove ${p.name} from contacts`}
+                    aria-label={`Remove ${p.name} from contacts`}
+                    disabled={busy === p.address}
+                    onClick={() => remove(p.address)}
+                    className="rounded-[5px] px-1.5 py-0.5 text-base leading-none text-muted transition hover:bg-raised hover:text-stop disabled:opacity-40"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {orphans.length > 0 && <p className="text-[11px] text-warn">{orphans.length === 1 ? '1 removed contact is' : `${orphans.length} removed contacts are`} still allowed by the signed limits until the owner signs new ones.</p>}
+        <p className="text-[11px] text-muted">Ticked contacts are the only wallets the next signed limits allow. Adding or removing a contact is written to the log.</p>
+      </div>
+    </Card>
+  );
+}
+
+function Limits({ status, policy, committed, reload, selected, changes }: DeskProps & { selected: string[]; changes: number }) {
   const [editing, setEditing] = useState(false);
   const [budget, setBudget] = useState('30');
   const [cap, setCap] = useState('15');
@@ -79,9 +213,16 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   });
-  const [allowed, setAllowed] = useState<string[]>(status.payees.map((p) => p.address));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const edit = () => {
+    if (policy) {
+      setBudget(String(policy.budget / 1e6));
+      setCap(String(policy.per_payment / 1e6));
+    }
+    setEditing(true);
+  };
 
   const grant = async (how: 'tronlink' | 'server') => {
     setBusy(how);
@@ -89,7 +230,7 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
     try {
       const w = window as any;
       if (how === 'tronlink' && !w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
-      const draft = await api<Draft>('/api/policy/draft', { json: { budget: Number(budget), perPayment: Number(cap), deadline: Math.floor(new Date(deadline).getTime() / 1000), payees: allowed } });
+      const draft = await api<Draft>('/api/policy/draft', { json: { budget: Number(budget), perPayment: Number(cap), deadline: Math.floor(new Date(deadline).getTime() / 1000), payees: selected } });
       const body = how === 'server' ? { id: draft.id, serverSign: true } : { id: draft.id, ...(await signWithTronLink(draft)) };
       await api('/api/policy/activate', { json: body });
       setEditing(false);
@@ -113,23 +254,30 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
     }
   };
 
-  const payees: string[] = policy ? JSON.parse(policy.payees) : [];
+  const signed: string[] = policy ? JSON.parse(policy.payees) : [];
   const used = policy ? Math.min(100, (committed / policy.budget) * 100) : 0;
+  const names = status.payees.filter((p) => selected.includes(p.address)).map((p) => p.name);
 
   return (
     <Card
-      id="policy"
-      eyebrow={policy ? `Owner-signed · policy #${policy.id}` : 'Owner-signed'}
-      title="Spending policy"
+      id="limits"
+      eyebrow={policy ? `Step 2 · owner-signed · policy #${policy.id}` : 'Step 2 · owner-signed'}
+      title="Payment limits"
       action={
         <div className="flex gap-2">
           {policy?.status === 'ACTIVE' && <Button kind="danger" busy={busy === 'stop'} onClick={stop}>Stop all payments</Button>}
-          {!editing && <Button kind="secondary" onClick={() => setEditing(true)}>{policy ? 'New policy' : 'Create policy'}</Button>}
+          {!editing && <Button kind={policy?.status === 'ACTIVE' && !changes ? 'secondary' : 'primary'} onClick={edit}>{policy ? 'Change limits' : 'Set limits'}</Button>}
         </div>
       }
     >
       <div className="grid gap-5">
         <ErrorLine error={error} />
+        {changes > 0 && !editing && (
+          <Callout tone="warn">
+            {changes === 1 ? '1 contact change is' : `${changes} contact changes are`} not signed yet. Payments still follow the signed list until the owner signs new limits.{' '}
+            <button type="button" onClick={edit} className="font-semibold underline">Sign new limits</button>
+          </Callout>
+        )}
         {policy && !editing && (
           <>
             <div className="rounded-lg border border-[#26382c] bg-sunken p-5">
@@ -144,7 +292,7 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
               <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-line">
                 <div className={`h-full ${used > 80 ? 'bg-warn' : 'bg-celadon'}`} style={{ width: `${used}%` }} />
               </div>
-              <div className="mt-2 flex justify-between font-mono text-[9px] tracking-[0.1em] text-[#8ca492]">
+              <div className="mt-2 flex justify-between gap-3 font-mono text-[9px] tracking-[0.1em] text-[#8ca492]">
                 <span>{Math.round(used)}% USED · PAID + IN FLIGHT + FEES</span>
                 <span className="num">{usdt(Math.max(0, policy.budget - committed))} LEFT</span>
               </div>
@@ -152,25 +300,7 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
             <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-3">
               <Stat label="Cap per payment" value={usdt(policy.per_payment)} />
               <Stat label="Deadline" value={<span className="text-base">{when(policy.deadline)}</span>} />
-              <Stat label="Allowed payees" value={`${payees.length} of ${status.payees.length}`} />
-            </div>
-            <div>
-              <div className="eyebrow mb-2">Payee book</div>
-              <ul className="grid gap-1 sm:grid-cols-2">
-                {status.payees.map((p) => {
-                  const ok = payees.includes(p.address);
-                  return (
-                    <li key={p.address} className={`flex items-center gap-3 rounded-[7px] border px-2.5 py-2 ${ok ? 'border-[#3f5a3d] bg-celadon-soft' : 'border-transparent opacity-60'}`}>
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#38493b] text-xs text-celadon">{p.name[0]}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px]">{p.name} <span className="text-[11px] text-muted">{p.country}</span></span>
-                        <Addr a={p.address} />
-                      </span>
-                      <span className={`font-mono text-[9px] tracking-[0.08em] ${ok ? 'text-celadon' : 'text-stop'}`}>{ok ? 'ALLOWED' : 'NOT ON LIST'}</span>
-                    </li>
-                  );
-                })}
-              </ul>
+              <Stat label="Contacts allowed" value={signed.length} />
             </div>
             <dl className="grid gap-2 border-t border-line pt-4 text-xs text-muted">
               <div className="flex justify-between gap-3"><dt>Signed by</dt><dd><Addr a={policy.owner ?? ''} /></dd></div>
@@ -179,7 +309,7 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
             </dl>
           </>
         )}
-        {!policy && !editing && <Callout>No policy yet. The owner signs a budget that includes fees, a cap per payment, a deadline and the allowed payees. Ansim cannot pay anything outside it.</Callout>}
+        {!policy && !editing && <Callout>No limits signed yet. Tick who can be paid in the contacts above, then set a budget that includes fees, a cap per payment and a deadline. Ansim cannot pay anything outside them.</Callout>}
         {editing && (
           <form className="grid gap-4" onSubmit={(e) => e.preventDefault()}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -193,30 +323,16 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
                 <input id="deadline" type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="px-3 py-2.5 text-sm" />
               </label>
             </div>
-            <fieldset className="grid gap-1">
-              <legend className="eyebrow mb-2">Allowed payees</legend>
-              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                {status.payees.map((p) => (
-                  <label key={p.address} className="flex items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-[13px] hover:bg-raised">
-                    <input
-                      id={`payee-${p.address}`}
-                      type="checkbox"
-                      checked={allowed.includes(p.address)}
-                      onChange={(e) => setAllowed((a) => (e.target.checked ? [...a, p.address] : a.filter((x) => x !== p.address)))}
-                    />
-                    <span>{p.name}</span>
-                    <span className="text-[11px] text-muted">{p.country}</span>
-                    <span className="ml-auto"><Addr a={p.address} /></span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <div className="flex flex-wrap gap-2">
-              <Button kind="primary" busy={busy === 'tronlink'} onClick={() => grant('tronlink')}>Sign with TronLink ↗</Button>
-              {status.ownerFallback && <Button kind="secondary" busy={busy === 'server'} onClick={() => grant('server')}>Sign with demo owner key</Button>}
-              <Button kind="quiet" onClick={() => setEditing(false)}>Cancel</Button>
+            <div className="text-[13px]">
+              <div className="eyebrow mb-1.5">Signing for {names.length} {names.length === 1 ? 'contact' : 'contacts'}</div>
+              {names.length ? <p className="text-muted">{names.join(', ')}</p> : <p className="text-stop">Tick at least one contact above.</p>}
             </div>
-            <Callout>Signing a new policy replaces the current one. The signature is TIP-712 typed data, checked by the backend and again by the auditor script.</Callout>
+            <div className="flex flex-wrap gap-2">
+              <Button kind="primary" type="button" disabled={!names.length} busy={busy === 'tronlink'} onClick={() => grant('tronlink')}>Sign with TronLink ↗</Button>
+              {status.ownerFallback && <Button kind="secondary" type="button" disabled={!names.length} busy={busy === 'server'} onClick={() => grant('server')}>Sign with demo owner key</Button>}
+              <Button kind="quiet" type="button" onClick={() => setEditing(false)}>Cancel</Button>
+            </div>
+            <Callout>Signing new limits replaces the current ones. The signature is TIP-712 typed data, checked by the backend and again by the auditor script.</Callout>
           </form>
         )}
       </div>
@@ -246,7 +362,7 @@ function ImportCard() {
     }
   };
   return (
-    <Card eyebrow="Today’s file" title="Import and screen" action={<Counter n={Object.keys(FLAGS).length} />}>
+    <Card eyebrow="Step 3 · today’s file" title="Import and screen" action={<Counter n={Object.keys(FLAGS).length} />}>
       <div className="grid gap-4">
         <ErrorLine error={error} />
         <input id="payout-file" type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="w-full min-w-0 text-xs text-muted file:mr-3 file:rounded-[7px] file:border file:border-edge file:bg-raised file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#d4e6cd]" />
@@ -369,7 +485,7 @@ export default function Console() {
       {status && (
         <>
           <div className="grid items-start gap-[18px] lg:grid-cols-[minmax(0,1.8fr)_minmax(315px,1fr)]">
-            <PolicyCard status={status} policy={policy.policy} committed={policy.committed} reload={load} />
+            <PolicyDesk status={status} policy={policy.policy} committed={policy.committed} reload={load} />
             <ImportCard />
           </div>
           <div className="mt-[18px] grid items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">

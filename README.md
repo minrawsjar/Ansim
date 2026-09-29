@@ -14,12 +14,13 @@ About 1.1 million foreign workers in Korea send money home every month, and the 
 
 ## What it does
 
-1. **The owner signs a spending policy** in TronLink: a budget that includes fees, a cap per payment, a deadline and the allowed payees. It is TIP-712 typed data, and its hash is recorded in the AnsimRegistry contract on Nile.
-2. **The operator imports the day's CSV or Excel file.** Korean headers such as 수취인 지갑주소 and 비고 are mapped automatically.
-3. **Code screens every row** for invalid addresses and amounts, duplicates, payees not in the book, lookalike wallets (address poisoning), three or more senders paying one new wallet (a money-mule pattern), reported scam wallets and Tether's live freeze list. The AI explains only the flagged rows, in Korean and English. The operator fixes, holds or confirms each one.
-4. **A pre-check** shows the GasFree payer account, supported token, balance, and total fees including the one-time activation fee.
-5. **The signer pays each approved row through GasFree**, but only if the policy allows it. Statuses update live: waiting, processing, confirming, paid or failed. A refused row is logged with its reason.
-6. **Reconcile and prove.** The export links every result to its source row and note. The batch's closing log hash is sealed on chain, and one command lets anyone check the batch against the signed policy.
+1. **The operator keeps a contact book** of the families' wallets. Ansim refuses to save a wallet that is invalid, looks like an existing contact's wallet (address poisoning), is on the reported list or is frozen by Tether. Every added or removed contact is written to the log.
+2. **The owner signs the payment limits** in TronLink: a budget that includes fees, a cap per payment, a deadline and the ticked contacts. It is TIP-712 typed data, and its hash is recorded in the AnsimRegistry contract on Nile.
+3. **The operator imports the day's CSV or Excel file.** Korean headers such as 수취인 지갑주소 and 비고 are mapped automatically.
+4. **Code screens every row** for invalid addresses and amounts, duplicates, payees not in the book, lookalike wallets (address poisoning), three or more senders paying one new wallet (a money-mule pattern), reported scam wallets and Tether's live freeze list. The AI explains only the flagged rows, in Korean and English. The operator fixes, holds or confirms each one.
+5. **A pre-check** shows the GasFree payer account, supported token, balance, and total fees including the one-time activation fee.
+6. **The signer pays each approved row through GasFree**, but only if the policy allows it. Statuses update live: waiting, processing, confirming, paid or failed. A refused row is logged with its reason.
+7. **Reconcile and prove.** The export links every result to its source row and note. The batch's closing log hash is sealed on chain, and one command lets anyone check the batch against the signed policy.
 
 ## What the AI does, and what stays in code
 

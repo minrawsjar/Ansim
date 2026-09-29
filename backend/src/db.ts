@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS tokens (
   effort TEXT
 );
 CREATE TABLE IF NOT EXISTS column_maps (signature TEXT PRIMARY KEY, mapping TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS payees (
+  address TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  country TEXT,
+  usual REAL NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 `;
 
 export type Policy = {

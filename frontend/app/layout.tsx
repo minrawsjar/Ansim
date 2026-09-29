@@ -27,7 +27,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="ml-1.5 hidden max-w-32 border-l border-line pl-4 font-mono text-[9px] leading-[1.7] tracking-[0.15em] text-muted lg:block">PAYOUTS, INSIDE THE SIGNED LINE</span>
             </Link>
             <nav className="hidden gap-7 text-xs text-muted md:flex">
-              <Link href="/#policy" className="hover:text-celadon">Spending policy</Link>
+              <Link href="/#contacts" className="hover:text-celadon">Contacts</Link>
+              <Link href="/#limits" className="hover:text-celadon">Payment limits</Link>
               <Link href="/#batches" className="hover:text-celadon">Batches</Link>
               <Link href="/metrics" className="hover:text-celadon">Tokens &amp; energy</Link>
             </nav>

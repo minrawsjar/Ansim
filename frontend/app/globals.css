@@ -37,6 +37,8 @@ body {
     border: 1px solid #405046;
     border-radius: 6px;
     color: var(--color-ink);
+    width: 100%;
+    min-width: 0;
   }
   input::placeholder,
   textarea::placeholder {

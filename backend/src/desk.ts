@@ -4,7 +4,7 @@ import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, no
 import { logEvent, allEvents, batchEvents } from './log';
 import { policyDomain, policyTypes, policyValue, policyHash, payeesHash } from './policy';
 import { parseSheet, headerSignature, ruleMapping, validMapping, toRows, type Mapping } from './importer';
-import { screen, BLOCKING, type Payee, type ScreenRow } from './screen';
+import { screen, contactProblem, BLOCKING, type Payee, type ScreenRow } from './screen';
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
 import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, NILE_USDT } from './tron';
 import { payerAddress, summarize, msg } from './orchestrator';
@@ -18,8 +18,43 @@ const readJson = <T>(name: string, fallback: T): T => {
   }
 };
 
-// The payee book: wallets this business has paid before, with the usual amount in USDT.
-export const payeeBook = () => readJson<{ address: string; name: string; usual: number }[]>('payees.json', []);
+// The payee book (contacts): wallets this business pays, with the usual amount in USDT.
+// Seeded once from data/payees.json, then edited in the console. user_version marks the seed as done,
+// so removing every contact does not bring the demo contacts back.
+type Contact = { address: string; name: string; country: string | null; usual: number };
+export function payeeBook(): Contact[] {
+  if (db.pragma('user_version', { simple: true }) === 0) {
+    const add = db.prepare('INSERT OR IGNORE INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (const p of readJson<Contact[]>('payees.json', [])) add.run(p.address, p.name, p.country ?? null, p.usual ?? 0, nowSec());
+    db.pragma('user_version = 1');
+  }
+  return db.prepare('SELECT address, name, country, usual FROM payees ORDER BY created_at, rowid').all() as Contact[];
+}
+
+export async function addContact(input: { name?: string; country?: string; address?: string; usual?: number | string }) {
+  const name = String(input.name ?? '').trim().slice(0, 80);
+  const address = String(input.address ?? '').trim();
+  const usual = Number(input.usual || 0);
+  if (!name) throw new Error('Enter the recipient’s name.');
+  if (!Number.isFinite(usual) || usual < 0) throw new Error('The usual amount must be a positive number.');
+  const problem = contactProblem(address, payeeBook(), reported());
+  if (problem) throw new Error(problem);
+  if ((await isTetherFrozen(address)) === true) throw new Error('Tether has frozen this wallet on mainnet.');
+  const country = String(input.country ?? '').trim().slice(0, 40) || null;
+  db.prepare('INSERT INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, ?)').run(address, name, country, usual, nowSec());
+  logEvent('CONTACT_ADDED', { address, name, country, usual });
+  return payeeBook();
+}
+
+// Removing a contact does not change a policy that is already signed.
+export function removeContact(address: string) {
+  const c = payeeBook().find((p) => p.address === address);
+  if (!c) throw new Error('That wallet is not in the contacts.');
+  db.prepare('DELETE FROM payees WHERE address = ?').run(address);
+  logEvent('CONTACT_REMOVED', { address, name: c.name });
+  return payeeBook();
+}
+
 const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6) }]));
 // Stand-in for wallets reported to police and exchanges.
 const reported = () => new Set(readJson<string[]>('reported.json', []));

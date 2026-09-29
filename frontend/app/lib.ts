@@ -1,6 +1,6 @@
 // Shared types and helpers for the console. Amounts from the backend are USDT base units (6 decimals).
 
-export type Payee = { name: string; country?: string; address: string; usual: number };
+export type Payee = { name: string; country: string | null; address: string; usual: number };
 export type Status = {
   gasfree: boolean; kiln: boolean; payer: string | null; ownerFallback: boolean; notary: boolean;
   registry: string | null; simulateLostLine: number | null; payees: Payee[];

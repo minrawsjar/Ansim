@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 import { db, activePolicy, getBatch } from './db';
 import { startRun, isRunning, recoverBatch, precheck, committed } from './orchestrator';
 import {
-  draftPolicy, activatePolicy, stopPolicy, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
+  draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status,
 } from './desk';
 
@@ -44,6 +44,9 @@ app.get('/policy', (c) => {
 app.post('/policy/draft', async (c) => c.json(draftPolicy(await c.req.json())));
 app.post('/policy/activate', async (c) => c.json(await activatePolicy(await c.req.json())));
 app.post('/policy/stop', async (c) => c.json(await stopPolicy()));
+
+app.post('/payees', async (c) => c.json(await addContact(await c.req.json())));
+app.delete('/payees/:address', (c) => c.json(removeContact(c.req.param('address'))));
 
 app.get('/batches', (c) =>
   c.json(db.prepare('SELECT b.*, (SELECT COUNT(*) FROM rows r WHERE r.batch_id = b.id) AS row_count FROM batches b ORDER BY id DESC').all()),

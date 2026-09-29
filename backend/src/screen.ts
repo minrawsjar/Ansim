@@ -24,6 +24,17 @@ export const validAddress = (a: string) => B58.test(a) && TronWeb.isAddress(a);
 // Same first 4 and last 4 characters: what most wallets show when they shorten an address.
 export const looksAlike = (a: string, b: string) => a !== b && a.slice(0, 4) === b.slice(0, 4) && a.slice(-4) === b.slice(-4);
 
+// Why a wallet must not be added to the contacts, or null. The Tether freeze check needs the network and runs separately.
+export function contactProblem(address: string, book: { address: string; name: string }[], reported: Set<string>): string | null {
+  if (!validAddress(address)) return 'Not a valid TRON address.';
+  const same = book.find((p) => p.address === address);
+  if (same) return `This wallet is already saved as ${same.name}.`;
+  const twin = book.find((p) => looksAlike(p.address, address));
+  if (twin) return `This wallet starts and ends like ${twin.name}'s but is a different address. That is how address-poisoning scams work, so it was not saved. Check the full address with the recipient.`;
+  if (reported.has(address)) return 'This wallet is on the reported scam list.';
+  return null;
+}
+
 // All checks are plain code. Only rows they flag are sent to the model for an explanation.
 export async function screen(
   rows: ScreenRow[],

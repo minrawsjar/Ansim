@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { refuseReason, payeesHash } from './policy';
-import { screen, looksAlike, validAddress } from './screen';
+import { screen, looksAlike, validAddress, contactProblem } from './screen';
 import { parseAmount, ruleMapping } from './importer';
 
 const A = 'TLyqzVGLV1srkB7dToTAEqgDSfPtXRJZYH';
@@ -66,4 +66,16 @@ test('event log is a hash chain', async () => {
   assert.equal(e1.hash, sha256(e1.prev + e1.body));
   assert.equal(e2.prev, e1.hash);
   assert.equal(e2.hash, sha256(e2.prev + e2.body));
+});
+
+test('a new contact is refused when it is invalid, saved already, a lookalike or reported', () => {
+  // A real pair with the same first and last four characters, found by setup.mjs for the demo file.
+  const lan = 'TXZit1DZuH3oLxZmxooogX3Uh5nuYiXDVt';
+  const twin = 'TXZiWc1wHoxz5dj8WeZZyhUBLE3VV8XDVt';
+  const book = [{ address: lan, name: 'Lan' }];
+  assert.equal(contactProblem(B, book, new Set()), null);
+  assert.match(contactProblem('T123', book, new Set())!, /valid TRON address/);
+  assert.match(contactProblem(lan, book, new Set())!, /already saved as Lan/);
+  assert.match(contactProblem(twin, book, new Set())!, /address-poisoning/);
+  assert.match(contactProblem(B, book, new Set([B]))!, /reported/);
 });
