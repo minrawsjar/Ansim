@@ -32,6 +32,7 @@ export type Approval = { value: { batchId: string; policyId: string; rowsHash: s
 export type BatchView = {
   batch: { id: number; source: string; status: string; mapped_by: string; columns: Record<string, string>; receipt: { ko: string; en: string } | null; close_hash: string | null; anchor_tx: string | null; policy_id: number | null; approval: Approval | null };
   approvalProblem: string | null;
+  approver: { owner: string | null; isDemoKey: boolean };
   vault: { address: string; feePerPayment: number } | null;
   policy: Policy | null; rows: Row[]; summary: Summary; events: BatchEvent[]; running: boolean;
 };

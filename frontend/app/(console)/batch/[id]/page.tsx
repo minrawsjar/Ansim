@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { api, usdt, when, signWithTronLink, BANK_FEE_RATE, GASFREE_FEE, FLAGS, REASONS, type BatchView, type Precheck, type Row, type TypedDraft } from '../../../lib';
+import { api, usdt, when, signWithTronLink, tronLinkState, BANK_FEE_RATE, GASFREE_FEE, FLAGS, REASONS, type BatchView, type Precheck, type Row, type TypedDraft } from '../../../lib';
 import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink, WaitingForTronLink } from '../../../ui';
 import { FlowMap } from '../../../flow-map';
 
@@ -143,6 +143,10 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
     setBusy(how);
     setError(null);
     try {
+      // Only the owner who signed the limits can approve. Say so before TronLink asks for a signature that would be refused.
+      const owner = view.approver?.owner;
+      const current = how === 'tronlink' ? (await tronLinkState()).address : null;
+      if (owner && current && current !== owner) throw new Error(`TronLink is on ${current}. Switch it to ${owner}, the account that signed the payment limits, then approve again.`);
       const body = how === 'server'
         ? { serverSign: true }
         : await signWithTronLink(await api<TypedDraft>(`/api/batches/${batch.id}/approval-draft`, { json: {} }));
@@ -163,7 +167,7 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
       action={!approved && canApprove && (
         <div className="flex flex-wrap gap-2">
           <Button kind="primary" busy={busy === 'tronlink'} disabled={!pay.length} onClick={() => approve('tronlink')}>Approve in TronLink ↗</Button>
-          <Button kind="secondary" busy={busy === 'server'} disabled={!pay.length} onClick={() => approve('server')}>Approve with demo owner key</Button>
+          {view.approver?.isDemoKey && <Button kind="secondary" busy={busy === 'server'} disabled={!pay.length} onClick={() => approve('server')}>Approve with demo owner key</Button>}
         </div>
       )}
     >
@@ -191,7 +195,7 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
           <>
             {approvalProblem && batch.approval && <Callout tone="warn">{approvalProblem}</Callout>}
             <p className="text-[13px] text-muted">
-              The operator prepared <b className="text-ink">{pay.length} payments, {usdt(total)} USDT</b>. Nothing is paid until the owner who signed the payment limits signs these exact rows. The signature is checked again by the auditor script.
+              The operator prepared <b className="text-ink">{pay.length} payments, {usdt(total)} USDT</b>. Nothing is paid until the owner who signed the payment limits{view.approver?.owner && <>, <Addr a={view.approver?.owner} />,</>} signs these exact rows. The signature is checked again by the auditor script.
             </p>
           </>
         )}

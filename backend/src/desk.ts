@@ -379,7 +379,7 @@ export async function approveBatch(batchId: number, input: { signature?: string;
     signedBy = 'server-demo-key';
   }
   if (!signature || !owner) throw new Error('A signature and the owner address are required.');
-  if (owner !== draft.owner) throw new Error('Only the owner who signed the payment limits can approve this batch.');
+  if (owner !== draft.owner) throw new Error(`Only the owner who signed the payment limits, ${draft.owner}, can approve this batch. It was signed by ${owner}.`);
   let ok = false;
   try {
     ok = await tw.trx.verifyTypedData(policyDomain, approvalTypes, draft.value, signature, owner);
@@ -617,6 +617,8 @@ export function batchView(batchId: number) {
     batch: { ...batch, columns: JSON.parse(batch.columns), receipt: batch.receipt ? JSON.parse(batch.receipt) : null, approval: batch.approval ? (JSON.parse(batch.approval) as Approval) : null },
     approvalProblem: batch.status === 'CLOSED' ? null : approvalProblem(batch),
     policy: batch.policy_id ? getPolicy(batch.policy_id) : null,
+    // Who can approve: the owner who signed the active limits. The demo key can approve only if it is that owner.
+    approver: { owner: activePolicy()?.owner ?? null, isDemoKey: !!process.env.OWNER_PRIVATE_KEY && addressFromKey(process.env.OWNER_PRIVATE_KEY) === activePolicy()?.owner },
     rows: rows.map((r) => ({ ...parseRow(r), country: places.get(r.receiver)?.country ?? null, city: places.get(r.receiver)?.city ?? null })),
     summary: summarize(rows),
     events: batchEvents(batchId).map((e) => ({ id: e.id, type: e.type, ts: e.ts_ms, hash: e.hash, data: JSON.parse(e.body).data })),
