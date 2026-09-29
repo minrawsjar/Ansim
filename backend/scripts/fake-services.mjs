@@ -76,25 +76,28 @@ http
     if (m) {
       for (const t of transfers.values()) advance(t);
       const a = account(m[1]);
-      return ok(res, { accountAddress: m[1], gasFreeAddress: gasFreeAddress(m[1]), active: a.active, nonce: a.nonce, allowSubmit: true, assets: [] });
+      return ok(res, { accountAddress: m[1], gasFreeAddress: gasFreeAddress(m[1]), active: a.active, nonce: a.nonce, allow_submit: true, assets: [] }); // docs spelling
     }
     if (path === '/api/v1/gasfree/submit' && req.method === 'POST') {
       const p = JSON.parse(body);
       if (bySig.has(p.sig)) return ok(res, transfers.get(bySig.get(p.sig))); // same permit sent twice: same transfer
-      const { sig, ...message } = p;
+      const { sig, requestId, ...message } = p; // eslint-disable-line no-unused-vars
       let valid = false;
       try {
         valid = await tw.trx.verifyTypedData(domain, types, message, '0x' + sig, p.user);
       } catch {
         valid = false;
       }
-      if (!valid) return fail(res, 'InvalidSignature', 'Permit signature does not match the user');
+      // Exception names as documented at docs.gasfree.io
+      if (!valid) return fail(res, 'InvalidSignatureException', 'Permit signature does not match the user');
       const a = account(p.user);
-      if (Number(p.nonce) !== a.nonce) return fail(res, 'InvalidNonce', `Expected nonce ${a.nonce}`);
-      if (Number(p.deadline) < Date.now() / 1000) return fail(res, 'DeadlineExceeded', 'Permit deadline has passed');
-      if (Number(p.maxFee) < TRANSFER_FEE + (a.active ? 0 : ACTIVATE_FEE)) return fail(res, 'MaxFeeExceeded', 'maxFee is below the required fee');
+      if ([...transfers.values()].some((t) => t.user === p.user && !['SUCCEED', 'FAILED'].includes(advance(t).state)))
+        return fail(res, 'TooManyPendingTransferException', 'Only one pending transfer per account');
+      if (Number(p.nonce) !== a.nonce) return fail(res, 'NonceNotMatchException', `Expected nonce ${a.nonce}`);
+      if (Number(p.deadline) < Date.now() / 1000) return fail(res, 'DeadlineExceededException', 'Permit deadline has passed');
+      if (Number(p.maxFee) < TRANSFER_FEE + (a.active ? 0 : ACTIVATE_FEE)) return fail(res, 'MaxFeeExceededException', 'maxFee is below the required fee');
       a.nonce += 1; // reserved on submit, like a pending transfer
-      const t = { id: randomBytes(8).toString('hex'), createdAt: Date.now(), state: 'WAITING', user: p.user, value: p.value, estimatedTransferFee: TRANSFER_FEE };
+      const t = { id: randomBytes(8).toString('hex'), requestId, createdAt: Date.now(), state: 'WAITING', user: p.user, value: p.value, estimatedTransferFee: TRANSFER_FEE };
       transfers.set(t.id, t);
       bySig.set(p.sig, t.id);
       return ok(res, t);

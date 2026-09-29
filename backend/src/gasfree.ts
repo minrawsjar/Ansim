@@ -4,8 +4,13 @@ import { tw, NILE_CHAIN_ID, NILE_USDT } from './tron';
 const BASE = process.env.GASFREE_BASE ?? 'https://open-test.gasfree.io/nile/';
 const CONTROLLER = process.env.GASFREE_CONTROLLER ?? 'THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc'; // Nile
 
-// A GasFree API rejection: the request reached GasFree and it said no.
-export class GasFreeRejected extends Error {}
+// A GasFree API rejection: the request reached GasFree and it said no. `reason` is GasFree's
+// exception name, such as NonceNotMatchException (see docs.gasfree.io).
+export class GasFreeRejected extends Error {
+  constructor(public reason: string, message: string) {
+    super(message ? `${reason}: ${message}` : reason);
+  }
+}
 
 async function gf(method: 'GET' | 'POST', path: string, body?: unknown) {
   const key = process.env.GASFREE_API_KEY, secret = process.env.GASFREE_API_SECRET;
@@ -24,9 +29,9 @@ async function gf(method: 'GET' | 'POST', path: string, body?: unknown) {
   try {
     j = JSON.parse(text);
   } catch {
-    throw new GasFreeRejected(`GasFree ${res.status}: ${text.slice(0, 200)}`);
+    throw new GasFreeRejected(`HTTP${res.status}`, text.slice(0, 200));
   }
-  if (j.code !== 200) throw new GasFreeRejected(`${j.reason ?? 'GasFree error'}: ${j.message ?? ''}`.trim());
+  if (j.code !== 200) throw new GasFreeRejected(j.reason ?? 'GasFreeError', j.message ?? '');
   return j.data as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
@@ -36,7 +41,8 @@ export type GasFreeProvider = {
   config: { maxPendingTransfer: number; minDeadlineDuration: number; maxDeadlineDuration: number; defaultDeadlineDuration: number };
 };
 export type GasFreeAccount = {
-  accountAddress: string; gasFreeAddress: string; active: boolean; nonce: number; allowSubmit: boolean;
+  accountAddress: string; gasFreeAddress: string; active: boolean; nonce: number;
+  allowSubmit: boolean; // the docs spell it allow_submit, the SDKs allowSubmit; account() fills both
   assets: { tokenAddress: string; tokenSymbol: string; frozen: number }[];
 };
 export type GasFreeTransfer = {
@@ -48,7 +54,10 @@ export type GasFreeTransfer = {
 export const gasfree = {
   tokens: async () => (await gf('GET', '/api/v1/config/token/all')).tokens as GasFreeToken[],
   providers: async () => (await gf('GET', '/api/v1/config/provider/all')).providers as GasFreeProvider[],
-  account: async (address: string) => (await gf('GET', `/api/v1/address/${address}`)) as GasFreeAccount,
+  account: async (address: string) => {
+    const a = await gf('GET', `/api/v1/address/${address}`);
+    return { ...a, allowSubmit: a.allowSubmit ?? a.allow_submit ?? true } as GasFreeAccount;
+  },
   submit: async (permit: object) => (await gf('POST', '/api/v1/gasfree/submit', permit)) as GasFreeTransfer,
   status: async (id: string) => (await gf('GET', `/api/v1/gasfree/${id}`)) as GasFreeTransfer,
 };
@@ -77,14 +86,15 @@ const types = {
 };
 
 export type Permit = {
+  requestId?: string; // our own id for the submission, sent to GasFree for tracing; not part of the signature
   token: string; serviceProvider: string; user: string; receiver: string;
   value: string; maxFee: string; deadline: number; version: number; nonce: number; sig: string;
 };
 
 // Signs one TIP-712 transfer permit. The fee cap and deadline are part of the signed message,
 // so GasFree's controller contract cannot charge more or execute later than this.
-export async function signPermit(m: Omit<Permit, 'version' | 'sig'>, privateKey: string): Promise<Permit> {
+export async function signPermit(m: Omit<Permit, 'version' | 'sig' | 'requestId'>, privateKey: string): Promise<Permit> {
   const message = { ...m, version: 1 };
   const sig = await tw.trx.signTypedData(domain, types, message, privateKey);
-  return { ...message, sig: sig.replace(/^0x/, '') };
+  return { requestId: crypto.randomUUID(), ...message, sig: sig.replace(/^0x/, '') };
 }

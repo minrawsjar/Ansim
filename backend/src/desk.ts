@@ -226,7 +226,8 @@ export async function askAuditor(batchId: number, question: string) {
 
 /* ---------------- read models ---------------- */
 
-const parseRow = (r: Row) => ({ ...r, flags: JSON.parse(r.flags) as string[], agent: r.agent ? JSON.parse(r.agent) : null, permit: undefined });
+const requestIdOf = (r: Row) => (r.permit ? (JSON.parse(r.permit).requestId as string | undefined) ?? null : null);
+const parseRow = (r: Row) => ({ ...r, flags: JSON.parse(r.flags) as string[], agent: r.agent ? JSON.parse(r.agent) : null, permit: undefined, request_id: requestIdOf(r) });
 
 export function batchView(batchId: number) {
   const batch = getBatch(batchId);
@@ -259,7 +260,7 @@ export function evidence(batchId: number) {
     rows: batchRows(batchId).map((r) => ({
       line: r.line, sender: r.sender, recipient: r.name, receiver: r.receiver, amount: r.amount, note: r.note,
       flags: JSON.parse(r.flags), decision: r.decision, state: r.state, reason: r.reason,
-      nonce: r.nonce, maxFee: r.max_fee, traceId: r.trace_id, txnHash: r.txn_hash, fee: r.fee,
+      nonce: r.nonce, maxFee: r.max_fee, requestId: requestIdOf(r), traceId: r.trace_id, txnHash: r.txn_hash, fee: r.fee,
     })),
     events: allEvents().map((e) => ({ id: e.id, body: e.body, prev: e.prev, hash: e.hash })),
   };
@@ -271,9 +272,9 @@ const csvCell = (v: unknown) => {
 };
 
 export function exportCsv(batchId: number) {
-  const head = ['line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason', 'request_id', 'txn_hash', 'fee_usdt', 'flags'];
+  const head = ['line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason', 'request_id', 'trace_id', 'txn_hash', 'fee_usdt', 'flags'];
   const lines = batchRows(batchId).map((r) =>
-    [r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason, r.trace_id, r.txn_hash, r.fee != null ? (r.fee / 1e6).toFixed(6) : '', JSON.parse(r.flags).join(' ')]
+    [r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason, requestIdOf(r), r.trace_id, r.txn_hash, r.fee != null ? (r.fee / 1e6).toFixed(6) : '', JSON.parse(r.flags).join(' ')]
       .map(csvCell)
       .join(','),
   );

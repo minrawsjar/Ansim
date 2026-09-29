@@ -137,13 +137,16 @@ async function payRow(row: Row) {
       payerKey(),
     );
     updateRow(row.id, { state: 'SIGNED', permit: JSON.stringify(permit), nonce: acct.nonce, deadline, max_fee: maxFee, signed_at_ms: Date.now(), error: null });
-    logEvent('ROW_SIGNED', { ...facts, nonce: acct.nonce, deadline }, row.batch_id, row.id);
+    logEvent('ROW_SIGNED', { ...facts, nonce: acct.nonce, deadline, requestId: permit.requestId }, row.batch_id, row.id);
     row = getRow(row.id);
   }
   if (!row.trace_id) await submit(row, false);
   row = getRow(row.id);
   if (row.trace_id && !DONE.has(row.state)) await poll(row);
 }
+
+// Rejections that mean "this permit will never run, sign a fresh one" (reasons from docs.gasfree.io).
+const RETRY_WITH_NEW_PERMIT = new Set(['NonceNotMatchException', 'DeadlineExceededException', 'TooManyPendingTransferException']);
 
 const simulateLost = (row: Row) =>
   Number(process.env.SIMULATE_LOST_RESPONSE_LINE) === row.line &&
@@ -166,15 +169,27 @@ async function submit(row: Row, resend: boolean) {
       return;
     }
     updateRow(row.id, { state: r.state ?? 'WAITING', trace_id: r.id, error: null });
-    logEvent(resend ? 'ROW_RESENT' : 'ROW_SUBMITTED', { line: row.line, traceId: r.id, nonce: permit.nonce, sameSignature: resend }, row.batch_id, row.id);
+    logEvent(resend ? 'ROW_RESENT' : 'ROW_SUBMITTED', { line: row.line, requestId: permit.requestId, traceId: r.id, nonce: permit.nonce, sameSignature: resend }, row.batch_id, row.id);
   } catch (e) {
     if (e instanceof GasFreeRejected && !resend) {
+      // GasFree refused this permit, so it is not queued and can never execute. Dropping it is safe.
+      if (RETRY_WITH_NEW_PERMIT.has(e.reason)) {
+        updateRow(row.id, { state: 'READY', permit: null, nonce: null, deadline: null, max_fee: null, signed_at_ms: null, error: msg(e) });
+        logEvent('ROW_PERMIT_DROPPED', { line: row.line, reason: e.reason, requestId: permit.requestId }, row.batch_id, row.id);
+        if (e.reason === 'TooManyPendingTransferException') await sleep(5000);
+        return;
+      }
+      if (e.reason === 'InsufficientBalanceException') {
+        updateRow(row.id, { state: 'READY', permit: null, nonce: null, deadline: null, max_fee: null, signed_at_ms: null, error: msg(e) });
+        logEvent('ROW_PERMIT_DROPPED', { line: row.line, reason: e.reason, requestId: permit.requestId }, row.batch_id, row.id);
+        throw new Error('GasFree says the balance is too low. Top up the GasFree address, then press Pay again.');
+      }
       updateRow(row.id, { state: 'FAILED', reason: 'REJECTED_BY_GASFREE', error: msg(e) });
-      logEvent('ROW_FAILED', { line: row.line, error: msg(e) }, row.batch_id, row.id);
+      logEvent('ROW_FAILED', { line: row.line, reason: e.reason, error: msg(e), requestId: permit.requestId }, row.batch_id, row.id);
       return;
     }
     updateRow(row.id, { state: 'UNKNOWN', error: msg(e) });
-    logEvent(resend ? 'ROW_RESEND_REJECTED' : 'ROW_SUBMIT_UNKNOWN', { line: row.line, error: msg(e) }, row.batch_id, row.id);
+    logEvent(resend ? 'ROW_RESEND_REJECTED' : 'ROW_SUBMIT_UNKNOWN', { line: row.line, error: msg(e), requestId: permit.requestId }, row.batch_id, row.id);
   }
 }
 
