@@ -11,9 +11,9 @@ import { isRunning, recoverBatch, precheck, committed } from './orchestrator';
 import { sendTelegram } from './alerts';
 import { usdtTransferProof } from './tron';
 import {
-  draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
+  draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, setContactCity, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
-  familyReceipt, findPayments, askDispute,
+  familyReceipt, confirmReceipt, findPayments, askDispute,
   vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments, planBatch,
 } from './desk';
 
@@ -52,6 +52,7 @@ app.post('/policy/stop', async (c) => c.json(await stopPolicy()));
 app.post('/payees', async (c) => c.json(await addContact(await c.req.json())));
 app.delete('/payees/:address', (c) => c.json(removeContact(c.req.param('address'))));
 app.post('/payees/:address/check', async (c) => c.json(await checkContact(c.req.param('address'))));
+app.patch('/payees/:address', async (c) => c.json(setContactCity(c.req.param('address'), String((await c.req.json()).city ?? ''))));
 
 app.get('/batches', (c) =>
   c.json(db.prepare('SELECT b.*, (SELECT COUNT(*) FROM rows r WHERE r.batch_id = b.id) AS row_count FROM batches b ORDER BY id DESC').all()),
@@ -143,6 +144,7 @@ app.get('/metrics', (c) => c.json(metrics()));
 
 // The family's receipt. The frontend lets this path through without the site password; the token is the key.
 app.get('/receipts/:token', (c) => c.json(familyReceipt(c.req.param('token'))));
+app.post('/receipts/:token/confirm', async (c) => c.json(confirmReceipt(c.req.param('token'), await c.req.json().catch(() => ({})))));
 
 app.get('/disputes', (c) => c.json(findPayments(c.req.query('q') ?? '')));
 app.post('/disputes/ask', async (c) => {

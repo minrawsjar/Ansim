@@ -105,7 +105,7 @@ export type Row = {
   permit: string | null; nonce: number | null; deadline: number | null; max_fee: number | null;
   trace_id: string | null; txn_hash: string | null; fee: number | null; error: string | null;
   signed_at_ms: number | null; updated_at_ms: number | null;
-  receipt_token: string | null; travel: string | null;
+  receipt_token: string | null; travel: string | null; ack: string | null;
 };
 
 function open() {
@@ -126,6 +126,8 @@ function open() {
   addColumn('policies', 'record_key', 'INTEGER');
   addColumn('batches', 'record_key', 'INTEGER');
   addColumn('payees', 'risk', 'TEXT');
+  addColumn('payees', 'city', 'TEXT');
+  addColumn('rows', 'ack', 'TEXT');
   return d;
 }
 

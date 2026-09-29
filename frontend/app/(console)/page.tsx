@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api, usdt, when, waitText, WALLET_FLAGS, signWithTronLink, sendWithTronLink, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Payee, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink, WaitingForTronLink } from '../ui';
 import { FlowMap, type FlowPayment } from '../flow-map';
+import { citiesOf, countries } from '../places';
 
 type Draft = TypedDraft & { id: number };
 
@@ -86,7 +87,7 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
   );
 }
 
-const EMPTY_CONTACT = { name: '', country: '', address: '', usual: '' };
+const EMPTY_CONTACT = { name: '', country: '', city: '', address: '', usual: '' };
 
 // What the wallet's public history on mainnet says. Code sets the flags; the model only explains them.
 function RiskLine({ p, onCheck, busy }: { p: Payee; onCheck: () => void; busy: boolean }) {
@@ -144,6 +145,18 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
       setBusy(null);
     }
   };
+  const setCity = async (address: string, city: string) => {
+    setBusy(`city:${address}`);
+    setError(null);
+    try {
+      await api(`/api/payees/${address}`, { method: 'PATCH', json: { city } });
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
   const check = async (address: string) => {
     setBusy(`check:${address}`);
     setError(null);
@@ -169,17 +182,22 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
         <ErrorLine error={error} />
         {adding && (
           <form onSubmit={(e) => { e.preventDefault(); save(); }} className="grid gap-3 rounded-lg border border-[#26382c] bg-sunken p-4">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
               <label className="grid gap-2 text-[11px] text-muted">Name
                 <input id="contact-name" required autoComplete="off" placeholder="Recipient’s full name" className="px-3 py-2.5 text-sm" {...field('name')} />
               </label>
               <label className="grid gap-2 text-[11px] text-muted">Country
-                <input id="contact-country" autoComplete="off" placeholder="Vietnam" className="px-3 py-2.5 text-sm" {...field('country')} />
+                <input id="contact-country" list="country-list" autoComplete="off" placeholder="Vietnam" className="px-3 py-2.5 text-sm" {...field('country')} />
+                <datalist id="country-list">{countries().map((c) => <option key={c} value={c} />)}</datalist>
+              </label>
+              <label className="grid gap-2 text-[11px] text-muted">City
+                <input id="contact-city" list="city-list" autoComplete="off" placeholder={citiesOf(form.country)[0] ?? 'Hanoi'} className="px-3 py-2.5 text-sm" {...field('city')} />
+                <datalist id="city-list">{citiesOf(form.country).map((c) => <option key={c} value={c} />)}</datalist>
               </label>
               <label className="grid gap-2 text-[11px] text-muted">Usual amount, USDT
                 <input id="contact-usual" type="number" min="0" step="0.01" placeholder="3.00" className="num px-3 py-2.5 font-mono text-sm" {...field('usual')} />
               </label>
-              <label className="grid gap-2 text-[11px] text-muted sm:col-span-3">TRON wallet address
+              <label className="grid gap-2 text-[11px] text-muted sm:col-span-4">TRON wallet address
                 <input id="contact-address" required autoComplete="off" spellCheck={false} placeholder="T…" className="px-3 py-2.5 font-mono text-sm" {...field('address')} />
               </label>
             </div>
@@ -209,7 +227,22 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
                   />
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#38493b] text-xs text-celadon">{p.name[0]}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px]">{p.name} <span className="text-[11px] text-muted">{p.country}</span></span>
+                    <span className="flex flex-wrap items-center gap-x-1.5 text-[13px]">
+                      <span className="truncate">{p.name}</span>
+                      {citiesOf(p.country).length > 0 ? (
+                        <select
+                          aria-label={`${p.name}’s city`}
+                          value={p.city ?? ''}
+                          disabled={busy === `city:${p.address}`}
+                          onChange={(e) => setCity(p.address, e.target.value)}
+                          className="!w-auto !rounded-[4px] !border-transparent !bg-transparent px-0.5 py-0 text-[11px] text-muted hover:!border-line"
+                        >
+                          <option value="">City?</option>
+                          {citiesOf(p.country).map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : p.city ? <span className="text-[11px] text-muted">{p.city}</span> : null}
+                      <span className="text-[11px] text-muted">{p.country}</span>
+                    </span>
                     <span className="flex flex-wrap items-center gap-x-2">
                       <Addr a={p.address} />
                       <span className="num font-mono text-[10px] text-muted">usual {p.usual.toFixed(2)} · 30 days {usdt(p.month)}</span>

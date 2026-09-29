@@ -112,6 +112,7 @@ function RowLine({ r, editable, onSaved, setError }: { r: Row; editable: boolean
           {r.fee != null && <span className="num font-mono text-[11px] text-muted">fee {usdt(r.fee)}</span>}
           {r.error && r.state !== 'SUCCEED' && <span className="max-w-48 text-[11px] break-words text-warn">{r.error}</span>}
           {r.travel && <span className="text-[11px] text-celadon">Travel Rule details recorded</span>}
+          {r.ack && <span className="text-[11px] text-celadon">✓ Family confirmed receipt{r.ack.city ? ` · ${r.ack.city}` : ''}</span>}
           {r.receipt_token && (
             <span className="flex items-center gap-1.5">
               <a href={`/r/${r.receipt_token}`} target="_blank" rel="noopener" className="text-[11px] text-celadon hover:underline">Family receipt ↗</a>
@@ -391,7 +392,7 @@ export default function BatchPage() {
           <OwnerApproval view={view} reload={load} />
           <Savings view={view} />
         </div>
-        <FlowMap title={`LIVE PAYOUT MAP · BATCH #${batch.id}`} payments={rows.filter((r) => r.decision === 'pay').map((r) => ({ id: r.id, country: r.country, amount: r.amount, state: r.state, label: r.name }))} />
+        <FlowMap title={`LIVE PAYOUT MAP · BATCH #${batch.id}`} payments={rows.filter((r) => r.decision === 'pay').map((r) => ({ id: r.id, country: r.ack?.city ? r.ack.country : r.country, city: r.ack?.city ?? r.city, amount: r.amount, state: r.state, label: r.name, confirmed: !!r.ack }))} />
       </div>
 
       {pre && <Card eyebrow="GasFree account" title="Pre-check" action={<button type="button" className="text-xs text-celadon hover:underline" onClick={() => setPre(null)}>Hide</button>}><PrecheckPanel p={pre} /></Card>}

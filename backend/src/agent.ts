@@ -86,6 +86,7 @@ Propose payments that follow the instruction. Use only the wallet addresses list
 Stay inside the limits: each amount at most the cap per payment, each contact's 30-day total at most the monthly cap, and the total plus 0.30 USDT per payment inside the remaining budget. Leave out contacts the limits do not allow, unless the instruction insists; then include them and say they will be refused.
 For each payment, write one short reason in Korean ("why_ko") and English ("why_en"), and a short note for the recipient ("note").
 If the instruction is unclear or nothing should be paid, return no rows and explain in the summary.
+The summary describes this draft: nothing has been paid yet, and the owner still has to approve it.
 Return {"rows": [{"address": string, "amount": number, "note": string, "why_ko": string, "why_en": string}], "summary": {"ko": string, "en": string}}.`,
 
   dispute: `You help a licensed Korean remittance operator answer a customer who asks about a payment, for example "my family did not get the money".

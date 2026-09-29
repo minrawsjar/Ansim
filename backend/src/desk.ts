@@ -38,20 +38,20 @@ export function screenRules() {
 // ran, so removing every contact does not bring the demo contacts back. Seeded contacts get
 // created_at 0: they were paid before, so they skip the waiting period for new contacts.
 type Risk = { checkedAt: number; level?: string; flags?: string[]; facts?: Awaited<ReturnType<typeof walletFacts>>; note?: { ko: string; en: string } | null; error?: string };
-type Contact = { address: string; name: string; country: string | null; usual: number; created_at: number; risk: Risk | null };
+type Contact = { address: string; name: string; country: string | null; city: string | null; usual: number; created_at: number; risk: Risk | null };
 export function payeeBook(): Contact[] {
   const version = db.pragma('user_version', { simple: true }) as number;
   if (version < 2) {
     const seed = readJson<Contact[]>('payees.json', []);
-    const add = db.prepare('INSERT OR IGNORE INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, 0)');
+    const add = db.prepare('INSERT OR IGNORE INTO payees (address, name, country, city, usual, created_at) VALUES (?, ?, ?, ?, ?, 0)');
     const old = db.prepare('UPDATE payees SET created_at = 0 WHERE address = ?');
     for (const p of seed) {
-      if (version < 1) add.run(p.address, p.name, p.country ?? null, p.usual ?? 0);
+      if (version < 1) add.run(p.address, p.name, p.country ?? null, p.city ?? null, p.usual ?? 0);
       else old.run(p.address);
     }
     db.pragma('user_version = 2');
   }
-  return (db.prepare('SELECT address, name, country, usual, created_at, risk FROM payees ORDER BY created_at, rowid').all() as (Omit<Contact, 'risk'> & { risk: string | null })[])
+  return (db.prepare('SELECT address, name, country, city, usual, created_at, risk FROM payees ORDER BY created_at, rowid').all() as (Omit<Contact, 'risk'> & { risk: string | null })[])
     .map((p) => ({ ...p, risk: p.risk ? (JSON.parse(p.risk) as Risk) : null }));
 }
 
@@ -78,7 +78,7 @@ export async function checkContact(address: string) {
   return payeeBook();
 }
 
-export async function addContact(input: { name?: string; country?: string; address?: string; usual?: number | string }) {
+export async function addContact(input: { name?: string; country?: string; city?: string; address?: string; usual?: number | string }) {
   const name = String(input.name ?? '').trim().slice(0, 80);
   const address = String(input.address ?? '').trim();
   const usual = Number(input.usual || 0);
@@ -88,9 +88,19 @@ export async function addContact(input: { name?: string; country?: string; addre
   if (problem) throw new Error(problem);
   if ((await isTetherFrozen(address)) === true) throw new Error('Tether has frozen this wallet on mainnet.');
   const country = String(input.country ?? '').trim().slice(0, 40) || null;
+  const city = String(input.city ?? '').trim().slice(0, 60) || null;
   const risk = await walletCheck(address);
-  db.prepare('INSERT INTO payees (address, name, country, usual, created_at, risk) VALUES (?, ?, ?, ?, ?, ?)').run(address, name, country, usual, nowSec(), JSON.stringify(risk));
+  db.prepare('INSERT INTO payees (address, name, country, city, usual, created_at, risk) VALUES (?, ?, ?, ?, ?, ?, ?)').run(address, name, country, city, usual, nowSec(), JSON.stringify(risk));
   logEvent('CONTACT_ADDED', { address, name, country, usual, riskLevel: risk.level ?? null, riskFlags: risk.flags ?? [] });
+  return payeeBook();
+}
+
+// The family's home city, as the customer gave it. It places the family on the payout map.
+export function setContactCity(address: string, city: string) {
+  if (!payeeBook().some((p) => p.address === address)) throw new Error('That wallet is not in the contacts.');
+  const value = city.trim().slice(0, 60) || null;
+  db.prepare('UPDATE payees SET city = ? WHERE address = ?').run(value, address);
+  logEvent('CONTACT_UPDATED', { address, city: value });
   return payeeBook();
 }
 
@@ -567,20 +577,25 @@ function receiptToken(r: Row) {
 const parseRow = (r: Row) => ({
   ...r, flags: JSON.parse(r.flags) as string[], agent: r.agent ? JSON.parse(r.agent) : null, permit: undefined,
   request_id: requestIdOf(r), receipt_token: receiptToken(r), travel: r.travel ? JSON.parse(r.travel) : null,
+  ack: r.ack ? (JSON.parse(r.ack) as Ack) : null,
 });
+
+// The family's own confirmation from their receipt page. `city` is optional and chosen on their phone;
+// exact coordinates and IP addresses are never received or stored.
+type Ack = { at: number; city: string | null; country: string | null };
 
 export function batchView(batchId: number) {
   const batch = getBatch(batchId);
   if (!batch) throw new Error('Batch not found.');
   const rows = batchRows(batchId);
-  const countries = new Map(payeeBook().map((p) => [p.address, p.country]));
+  const places = new Map(payeeBook().map((p) => [p.address, p]));
   const vault = vaultInfo();
   return {
     vault: vault && { address: vault.address, feePerPayment: vault.feePerPayment },
     batch: { ...batch, columns: JSON.parse(batch.columns), receipt: batch.receipt ? JSON.parse(batch.receipt) : null, approval: batch.approval ? (JSON.parse(batch.approval) as Approval) : null },
     approvalProblem: batch.status === 'CLOSED' ? null : approvalProblem(batch),
     policy: batch.policy_id ? getPolicy(batch.policy_id) : null,
-    rows: rows.map((r) => ({ ...parseRow(r), country: countries.get(r.receiver) ?? null })),
+    rows: rows.map((r) => ({ ...parseRow(r), country: places.get(r.receiver)?.country ?? null, city: places.get(r.receiver)?.city ?? null })),
     summary: summarize(rows),
     events: batchEvents(batchId).map((e) => ({ id: e.id, type: e.type, ts: e.ts_ms, hash: e.hash, data: JSON.parse(e.body).data })),
   };
@@ -631,9 +646,14 @@ export function exportCsv(batchId: number) {
 
 // The latest payments across all batches, for the payout map on the home page.
 export function recentPayments() {
-  const countries = new Map(payeeBook().map((p) => [p.address, p.country]));
-  const rows = db.prepare("SELECT id, receiver, amount, state, name FROM rows WHERE decision = 'pay' ORDER BY id DESC LIMIT 60").all() as Pick<Row, 'id' | 'receiver' | 'amount' | 'state' | 'name'>[];
-  return rows.map((r) => ({ id: r.id, country: countries.get(r.receiver) ?? null, amount: r.amount, state: r.state, label: r.name }));
+  const places = new Map(payeeBook().map((p) => [p.address, p]));
+  const rows = db.prepare("SELECT id, receiver, amount, state, name, ack FROM rows WHERE decision = 'pay' ORDER BY id DESC LIMIT 60").all() as Pick<Row, 'id' | 'receiver' | 'amount' | 'state' | 'name' | 'ack'>[];
+  return rows.map((r) => {
+    const ack = r.ack ? (JSON.parse(r.ack) as Ack) : null;
+    const contact = places.get(r.receiver);
+    // A city the family confirmed from their phone wins over the one on file.
+    return { id: r.id, country: ack?.city ? ack.country : contact?.country ?? null, city: ack?.city ?? contact?.city ?? null, amount: r.amount, state: r.state, label: r.name, confirmed: !!ack };
+  });
 }
 
 /* ---------------- family receipts & disputes ---------------- */
@@ -650,7 +670,21 @@ export function familyReceipt(token: string) {
     status, sender: r.sender, name: r.name, amount: r.amount, note: r.note, wallet: r.receiver,
     country: payeeBook().find((p) => p.address === r.receiver)?.country ?? null,
     txnHash: status === 'paid' ? r.txn_hash : null, paidAt: paid?.ts_ms ?? null,
+    ack: r.ack ? (JSON.parse(r.ack) as Ack) : null,
   };
+}
+
+export function confirmReceipt(token: string, input: { city?: unknown; country?: unknown }) {
+  const r = db.prepare('SELECT * FROM rows WHERE receipt_token = ?').get(token) as Row | undefined;
+  if (!r || r.decision !== 'pay') throw new Error('Receipt not found.');
+  if (r.state !== 'SUCCEED') throw new Error('This payment has not arrived yet.');
+  if (!r.ack) {
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : null);
+    const ack: Ack = { at: nowSec(), city: text(input.city), country: text(input.country) };
+    db.prepare('UPDATE rows SET ack = ? WHERE id = ?').run(JSON.stringify(ack), r.id);
+    logEvent('RECEIPT_CONFIRMED', { line: r.line, city: ack.city, country: ack.country }, r.batch_id, r.id);
+  }
+  return familyReceipt(token);
 }
 
 const rowEvents = (rowId: number) =>

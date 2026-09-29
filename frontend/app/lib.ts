@@ -5,7 +5,7 @@ export type WalletRisk = {
   checkedAt: number; level?: 'none' | 'review' | 'high'; flags?: string[]; error?: string; note?: { ko: string; en: string } | null;
   facts?: { used: boolean; createdAt: number | null; isContract: boolean; trx: number; usdtIn7d: { transfers: number; senders: number; total: number }; frozenSenders: string[] };
 };
-export type Payee = { name: string; country: string | null; address: string; usual: number; created_at: number; month: number; risk: WalletRisk | null };
+export type Payee = { name: string; country: string | null; city: string | null; address: string; usual: number; created_at: number; month: number; risk: WalletRisk | null };
 export type Rules = { contactWaitHours: number; travelRuleMin: number; travelRuleKrw: number; krwPerUsdt: number };
 export type Status = {
   gasfree: boolean; kiln: boolean; payer: string | null; ownerFallback: boolean; notary: boolean; telegram: boolean;
@@ -23,7 +23,8 @@ export type Row = {
   amount_raw: string | null; note: string | null; flags: string[]; agent: { ko: string; en: string; action: string } | null;
   decision: 'pay' | 'hold' | 'remove'; state: string; reason: string | null; request_id: string | null; trace_id: string | null;
   txn_hash: string | null; fee: number | null; max_fee: number | null; error: string | null;
-  receipt_token: string | null; travel: { originatorId: string; purpose: string } | null; country: string | null;
+  receipt_token: string | null; travel: { originatorId: string; purpose: string } | null; country: string | null; city: string | null;
+  ack: { at: number; city: string | null; country: string | null } | null;
 };
 export type Summary = { total: number; paid: number; failed: number; refused: number; held: number; ready: number; awaiting: number; amountPaid: number; fees: number };
 export type BatchEvent = { id: number; type: string; ts: number; hash: string; data: Record<string, unknown> };

@@ -11,7 +11,7 @@ const sameText = (a: string, b: string) => {
 };
 
 // A family opens their receipt without the site password. The unguessable token in the link is the key.
-const isReceipt = (path: string) => /^\/r\/[\w-]+$/.test(path) || /^\/api\/receipts\/[\w-]+$/.test(path);
+const isReceipt = (path: string) => /^\/r\/[\w-]+$/.test(path) || /^\/api\/receipts\/[\w-]+(\/confirm)?$/.test(path);
 
 export function proxy(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;

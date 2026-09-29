@@ -3,36 +3,42 @@
     "name": "Dummy 1",
     "country": "Vietnam",
     "address": "TWTRqGYVDY6MHkcRH8iRBJcX3kWbNFp6Pz",
-    "usual": 3
+    "usual": 3,
+    "city": "Ho Chi Minh City"
   },
   {
     "name": "Dummy 2",
     "country": "Vietnam",
     "address": "TC12C8b3ucM7LwDQnPQDKDR8qSjUunz2P1",
-    "usual": 2.5
+    "usual": 2.5,
+    "city": "Hanoi"
   },
   {
     "name": "Dummy 3",
     "country": "Philippines",
     "address": "TQYJVPVr89y8qwSvQi4denhy7hV1GKQGVe",
-    "usual": 2
+    "usual": 2,
+    "city": "Cebu City"
   },
   {
     "name": "Dummy 4",
     "country": "Nepal",
     "address": "TMHtqxZS7swQ79aqwyFDsRad7VgpfLBuoa",
-    "usual": 3
+    "usual": 3,
+    "city": "Pokhara"
   },
   {
     "name": "Dummy 5",
     "country": "Philippines",
     "address": "TWRMWKCUWnrvWeoFmFC2ZGhEgFRWgqviem",
-    "usual": 2
+    "usual": 2,
+    "city": "Davao City"
   },
   {
     "name": "Dummy 6",
     "country": "Nepal",
     "address": "TYTGczFG86EWhBaBkMtrXhATVf6pfkJT6m",
-    "usual": 2
+    "usual": 2,
+    "city": "Kathmandu"
   }
 ]

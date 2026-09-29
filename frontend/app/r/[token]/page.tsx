@@ -3,16 +3,19 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api, usdt, tronscanTx } from '../../lib';
+import { nearestCity } from '../../places';
 
 type Receipt = {
   status: 'paid' | 'on_the_way' | 'not_sent'; sender: string | null; name: string | null; amount: number | null; note: string | null;
   wallet: string; country: string | null; txnHash: string | null; paidAt: number | null;
+  ack: { at: number; city: string | null } | null;
 };
 type Words = {
   locale: string; heading: string; check: string; noFee: string;
   paid: (s: string, n: string, a: string, w: string, date: string, time: string) => string;
   onTheWay: (s: string, n: string, a: string) => string;
   notSent: string;
+  confirm: string; shareCity: string; thanks: string;
 };
 
 // Plain, short sentences so they survive translation. They should still be checked by a native speaker.
@@ -22,30 +25,35 @@ const LANG: Record<string, Words> = {
     paid: (s, n, a, w, date, time) => `${s} đã gửi ${a} USDT cho ${n}. Tiền đã vào ví có đuôi ${w} lúc ${time} ngày ${date}.`,
     onTheWay: (s, n, a) => `${s} đang gửi ${a} USDT cho ${n}. Tiền đang trên đường đến.`,
     notSent: 'Khoản tiền này chưa được gửi. Vui lòng liên hệ người gửi.',
+    confirm: 'Tôi đã nhận được tiền', shareCity: 'Chia sẻ thành phố của tôi (không phải vị trí chính xác)', thanks: 'Cảm ơn. Người gửi sẽ thấy bạn đã nhận được tiền.',
   },
   tl: {
     locale: 'fil-PH', heading: 'Resibo ng padala', check: 'Tingnan sa TRONSCAN', noFee: 'Walang bayad na ibinawas sa halagang ito.',
     paid: (s, n, a, w, date, time) => `Nagpadala si ${s} ng ${a} USDT kay ${n}. Pumasok ito sa wallet na nagtatapos sa ${w} noong ${date}, ${time}.`,
     onTheWay: (s, n, a) => `Nagpapadala si ${s} ng ${a} USDT kay ${n}. Papunta na ito.`,
     notSent: 'Hindi naipadala ang perang ito. Makipag-ugnayan sa nagpadala.',
+    confirm: 'Natanggap ko na ang pera', shareCity: 'Ibahagi ang aking lungsod (hindi ang eksaktong lokasyon)', thanks: 'Salamat. Makikita ng nagpadala na natanggap mo ito.',
   },
   ne: {
     locale: 'ne-NP', heading: 'रकम पठाएको रसिद', check: 'TRONSCAN मा हेर्नुहोस्', noFee: 'यो रकमबाट कुनै शुल्क काटिएको छैन।',
     paid: (s, n, a, w, date, time) => `${s} ले ${n} लाई ${a} USDT पठाउनुभयो। यो ${date} ${time} मा ${w} मा अन्त्य हुने वालेटमा आइपुग्यो।`,
     onTheWay: (s, n, a) => `${s} ले ${n} लाई ${a} USDT पठाउँदै हुनुहुन्छ। यो बाटोमा छ।`,
     notSent: 'यो रकम पठाइएको छैन। कृपया पठाउने व्यक्तिलाई सम्पर्क गर्नुहोस्।',
+    confirm: 'मैले रकम पाएँ', shareCity: 'मेरो सहर साझा गर्नुहोस् (ठ्याक्कै स्थान होइन)', thanks: 'धन्यवाद। पठाउने व्यक्तिले तपाईंले रकम पाउनुभएको देख्नुहुनेछ।',
   },
   ko: {
     locale: 'ko-KR', heading: '송금 영수증', check: 'TRONSCAN에서 확인하기', noFee: '받는 금액에서 수수료가 빠지지 않았습니다.',
     paid: (s, n, a, w, date, time) => `${s}님이 ${n}님께 ${a} USDT를 보냈습니다. ${date} ${time}에 끝자리 ${w} 지갑으로 입금되었습니다.`,
     onTheWay: (s, n, a) => `${s}님이 ${n}님께 ${a} USDT를 보내는 중입니다.`,
     notSent: '이 송금은 보내지지 않았습니다. 송금한 분께 문의해 주세요.',
+    confirm: '받았습니다', shareCity: '내 도시 공유 (정확한 위치 아님)', thanks: '감사합니다. 송금한 분께 수령 확인이 전달됩니다.',
   },
   en: {
     locale: 'en-GB', heading: 'Payment receipt', check: 'Check it on TRONSCAN', noFee: 'No fee was taken from this amount.',
     paid: (s, n, a, w, date, time) => `${s} sent ${a} USDT to ${n}. It arrived in the wallet ending ${w} on ${date} at ${time}.`,
     onTheWay: (s, n, a) => `${s} is sending ${a} USDT to ${n}. It is on its way.`,
     notSent: 'This payment was not sent. Please contact the sender.',
+    confirm: 'I received it', shareCity: 'Share my city (not my exact location)', thanks: 'Thank you. The sender will see that you received it.',
   },
 };
 const BY_COUNTRY: Record<string, string> = { vietnam: 'vi', philippines: 'tl', nepal: 'ne' };
@@ -66,6 +74,42 @@ function Block({ w, r, big }: { w: Words; r: Receipt; big?: boolean }) {
       {r.txnHash && (
         <a href={tronscanTx(r.txnHash)} target="_blank" rel="noopener" className="w-fit text-[13px] text-celadon underline-offset-2 hover:underline">{w.check} ↗</a>
       )}
+    </div>
+  );
+}
+
+// Asks the phone for its position once, with the family's permission, and keeps only the nearest known
+// city. The coordinates stay on the phone; only the city name is sent.
+const cityFromPhone = () =>
+  new Promise<{ city: string; country: string } | null>((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = nearestCity(pos.coords.latitude, pos.coords.longitude);
+        resolve(p && { city: p.city, country: p.country });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 600_000 },
+    );
+  });
+
+function Confirm({ w, token, onDone }: { w: Words; token: string; onDone: (r: Receipt) => void }) {
+  const [share, setShare] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    const place = share ? await cityFromPhone() : null;
+    api<Receipt>(`/api/receipts/${token}/confirm`, { json: place ?? {} }).then(onDone).catch(() => setBusy(false));
+  };
+  return (
+    <div lang={w.locale} className="grid gap-3 border-t border-line pt-5">
+      <button type="button" onClick={send} disabled={busy} className="rounded-[7px] border border-celadon bg-celadon px-4 py-3 text-sm font-semibold text-on-celadon disabled:opacity-60">
+        {busy ? '…' : `✓ ${w.confirm}`}
+      </button>
+      <label className="flex items-center gap-2 text-[12px] text-muted">
+        <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
+        {w.shareCity}
+      </label>
     </div>
   );
 }
@@ -96,6 +140,12 @@ export default function FamilyReceipt() {
             {r.note && <span className="text-[13px] text-muted">{r.note}</span>}
           </div>
           <Block w={LANG[lang]} r={r} big />
+          {r.status === 'paid' && !r.ack && <Confirm w={LANG[lang]} token={token} onDone={setR} />}
+          {r.ack && (
+            <p lang={LANG[lang].locale} className="border-t border-line pt-5 text-[13px] text-celadon">
+              ✓ {LANG[lang].thanks}{r.ack.city ? ` · ${r.ack.city}` : ''}
+            </p>
+          )}
           <div className="border-t border-line pt-5"><Block w={LANG.ko} r={r} /></div>
           {lang !== 'en' && <div className="border-t border-line pt-5"><Block w={LANG.en} r={r} /></div>}
           <p className="border-t border-line pt-4 font-mono text-[11px] break-all text-muted">{r.wallet}</p>

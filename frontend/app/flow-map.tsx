@@ -2,13 +2,16 @@
 
 import { useSyncExternalStore } from 'react';
 import { usdt } from './lib';
+import { placeFor } from './places';
 
 export type FlowPayment = {
   id: number | string;
   country: string | null;
+  city?: string | null; // the family's city; the country's capital when missing or unknown
   amount: number | null;
   state: string;
   label?: string | null;
+  confirmed?: boolean; // the family confirmed receipt on their receipt page
 };
 
 type Pt = [number, number];
@@ -96,21 +99,6 @@ const LAND = `
 const DOTS = LAND.trim().split('\n').flatMap((row, j) => [...row].flatMap((c, i) => (c === '#' ? [`M${i * 10 + 5} ${j * 10 + 5}h0`] : []))).join('');
 
 const SEOUL = xy(37.57, 126.98);
-// Label side (right, left, below right) keeps labels off the arcs and off each other.
-type City = { country: string; city: string; at: Pt; side: 'r' | 'l' | 'd' };
-const CITIES: Record<string, City> = {
-  vietnam: { country: 'Vietnam', city: 'Hanoi', at: xy(21.03, 105.85), side: 'l' },
-  philippines: { country: 'Philippines', city: 'Manila', at: xy(14.6, 120.98), side: 'r' },
-  nepal: { country: 'Nepal', city: 'Kathmandu', at: xy(27.72, 85.32), side: 'd' },
-  cambodia: { country: 'Cambodia', city: 'Phnom Penh', at: xy(11.56, 104.92), side: 'd' },
-  indonesia: { country: 'Indonesia', city: 'Jakarta', at: xy(-6.21, 106.85), side: 'r' },
-  thailand: { country: 'Thailand', city: 'Bangkok', at: xy(13.76, 100.5), side: 'd' },
-  myanmar: { country: 'Myanmar', city: 'Yangon', at: xy(16.84, 96.17), side: 'l' },
-  bangladesh: { country: 'Bangladesh', city: 'Dhaka', at: xy(23.81, 90.41), side: 'l' },
-  'sri lanka': { country: 'Sri Lanka', city: 'Colombo', at: xy(6.93, 79.86), side: 'r' },
-  uzbekistan: { country: 'Uzbekistan', city: 'Tashkent', at: xy(41.3, 69.24), side: 'r' },
-  mongolia: { country: 'Mongolia', city: 'Ulaanbaatar', at: xy(47.89, 106.91), side: 'r' },
-};
 // Offsets in cqw track the marker radius, which scales with the map; the label text does not.
 const SIDE = { r: 'translate(calc(1cqw + 3px),-50%)', l: 'translate(calc(-100% - 1cqw - 3px),-50%)', d: 'translate(calc(0.6cqw + 2px),calc(0.6cqw + 2px))' };
 
@@ -137,16 +125,23 @@ const onMotionChange = (cb: () => void) => {
 
 export function FlowMap({ payments, title = 'LIVE PAYOUT MAP · TRON NILE' }: { payments: FlowPayment[]; title?: string }) {
   const still = useSyncExternalStore(onMotionChange, () => matchMedia(REDUCED).matches, () => false);
-  const cities = Object.values(CITIES)
-    .map((c) => {
-      const ps = payments.filter((p) => CITIES[p.country?.trim().toLowerCase() ?? ''] === c);
-      const by = (k: Kind) => ps.filter((p) => kindOf(p.state) === k);
-      return { ...c, ps, ready: by('ready'), moving: by('moving'), paid: by('paid'), refused: by('refused') };
-    })
-    .filter((c) => c.ps.length);
+  // One destination per city: the family's city, or the capital when it is missing or not on the map.
+  const groups = new Map<string, { country: string; city: string; at: Pt; side: 'r' | 'l' | 'd'; ps: FlowPayment[] }>();
+  for (const p of payments) {
+    const pl = placeFor(p.country, p.city);
+    if (!pl) continue;
+    const k = `${pl.country}|${pl.city}`;
+    if (!groups.has(k)) groups.set(k, { country: pl.country, city: pl.city, side: pl.side, at: xy(pl.lat, pl.lon), ps: [] });
+    groups.get(k)!.ps.push(p);
+  }
+  const cities = [...groups.values()].map((c) => {
+    const by = (k: Kind) => c.ps.filter((p) => kindOf(p.state) === k);
+    return { ...c, ready: by('ready'), moving: by('moving'), paid: by('paid'), refused: by('refused'), confirmed: c.ps.filter((p) => p.confirmed) };
+  });
+  const countryCount = new Set(cities.map((c) => c.country)).size;
   const total = payments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
   const summary = cities.length
-    ? cities.map((c) => `${c.country}: ${c.paid.length} paid, ${c.moving.length} on its way, ${c.refused.length} refused${c.ready.length ? `, ${c.ready.length} not started` : ''}`).join('; ')
+    ? cities.map((c) => `${c.city}, ${c.country}: ${c.paid.length} paid, ${c.moving.length} on its way, ${c.refused.length} refused${c.ready.length ? `, ${c.ready.length} not started` : ''}${c.confirmed.length ? `, ${c.confirmed.length} confirmed by the family` : ''}`).join('; ')
     : 'No payments on the map yet';
   const corner = 'pointer-events-none absolute font-mono text-[9px] tracking-[0.1em] text-[#8ca492] uppercase';
   const pct = ([x, y]: Pt) => ({ left: `${(x / W) * 100}%`, top: `${(y / H) * 100}%` });
@@ -160,7 +155,7 @@ export function FlowMap({ payments, title = 'LIVE PAYOUT MAP · TRON NILE' }: { 
           const [ready, moving, paid, refused] = [arc('ready'), arc('moving'), arc('paid'), arc('refused')];
           const cut = bezier(refused, c.at, 0.55);
           return (
-            <g key={c.city} fill="none" strokeWidth={2.5} strokeLinecap="round">
+            <g key={`${c.country}|${c.city}`} fill="none" strokeWidth={2.5} strokeLinecap="round">
               {c.ready.length > 0 && (
                 <path d={d(ready, c.at)} stroke="var(--color-muted)" strokeOpacity={0.4} strokeDasharray="8 10">
                   <title>{tip(c.ready)}</title>
@@ -204,6 +199,14 @@ export function FlowMap({ payments, title = 'LIVE PAYOUT MAP · TRON NILE' }: { 
                   <circle cx={c.at[0]} cy={c.at[1]} r={7} />
                 </g>
               )}
+              {c.confirmed.length > 0 && (
+                // The family's own confirmation: a pin ring with a check mark.
+                <g stroke="var(--color-celadon)" fill="none">
+                  <title>{`Confirmed by the family: ${c.confirmed.map((p) => p.label || 'payment').join(', ')}`}</title>
+                  <circle cx={c.at[0]} cy={c.at[1]} r={26} strokeWidth={2} strokeDasharray="5 4" />
+                  <path d={`M${c.at[0] + 18} ${c.at[1] - 30}l5 5l10 -11`} strokeWidth={3} />
+                </g>
+              )}
             </g>
           );
         })}
@@ -220,9 +223,9 @@ export function FlowMap({ payments, title = 'LIVE PAYOUT MAP · TRON NILE' }: { 
         </g>
       </svg>
 
-      {[{ city: 'Seoul', at: SEOUL, side: 'r' as const, text: 'Seoul', seoul: true }, ...cities.map((c) => ({ ...c, text: `${c.city} · ${c.paid.length}/${c.ps.length}`, seoul: false }))].map((c) => (
+      {[{ city: 'Seoul', country: 'Korea', at: SEOUL, side: 'r' as const, text: 'Seoul', seoul: true }, ...cities.map((c) => ({ ...c, text: `${c.city} · ${c.paid.length}/${c.ps.length}${c.confirmed.length ? ` · ✓${c.confirmed.length}` : ''}`, seoul: false }))].map((c) => (
         <div
-          key={c.city}
+          key={`${c.country}|${c.city}`}
           style={{ ...pct(c.at), transform: SIDE[c.side] }}
           className={`pointer-events-none absolute font-mono text-[9px] tracking-[0.1em] whitespace-nowrap uppercase [text-shadow:0_0_4px_#111a15] ${c.seoul ? 'text-celadon' : 'text-[#8ca492]'}`}
         >
@@ -232,7 +235,7 @@ export function FlowMap({ payments, title = 'LIVE PAYOUT MAP · TRON NILE' }: { 
 
       <div className={`${corner} top-2.5 left-3`}>{title}</div>
       <div className={`${corner} top-2.5 right-3`}>
-        Seoul → {cities.length} {cities.length === 1 ? 'country' : 'countries'}
+        Seoul → {cities.length} {cities.length === 1 ? 'city' : 'cities'} · {countryCount} {countryCount === 1 ? 'country' : 'countries'}
       </div>
       <div className={`${corner} bottom-2.5 left-3 flex flex-col gap-1 @md:flex-row @md:gap-3`}>
         <span className="flex items-center gap-1.5"><i className="h-0.5 w-3 rounded-full bg-celadon" />Paid</span>

@@ -15,6 +15,7 @@ const MESSAGES: Record<string, (d: Data) => string> = {
   VAULT_RELEASED: (d) => `Vault released ${usdt(d.amount)} USDT for ${d.count} approved payments.`,
   VAULT_REFUSED: (d) => `Vault refused to release money: ${d.reason}`,
   VAULT_FROZEN: () => 'The vault was frozen. No batch can take money from it.',
+  RECEIPT_CONFIRMED: (d) => `The family confirmed they received line ${d.line}${d.city ? `, from ${d.city}` : ''}.`,
   BATCH_APPROVED: (d) => `Batch approved by ${short(d.owner)}: ${d.count} payments, ${usdt(d.total)} USDT.`,
 };
 

@@ -124,7 +124,8 @@ for (let i = 0; i < 5; i++) {
 }
 const COUNTRIES = ['Vietnam', 'Vietnam', 'Philippines', 'Nepal', 'Philippines', 'Nepal'];
 const USUAL = [3, 2.5, 2, 3, 2, 2];
-const payees = wallets.map((w, i) => ({ name: `Dummy ${i + 1}`, country: COUNTRIES[i], address: w.address, usual: USUAL[i] }));
+const CITIES = ['Ho Chi Minh City', 'Hanoi', 'Cebu City', 'Pokhara', 'Davao City', 'Kathmandu'];
+const payees = wallets.map((w, i) => ({ name: `Dummy ${i + 1}`, country: COUNTRIES[i], city: CITIES[i], address: w.address, usual: USUAL[i] }));
 const keyFile = new URL('demo-wallets.local.json', DATA);
 fs.writeFileSync(keyFile, JSON.stringify(wallets.map((w, i) => ({ name: `Dummy ${i + 1}`, ...w })), null, 2));
 fs.chmodSync(keyFile, 0o600);
