@@ -5,10 +5,11 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, usdt, when, signWithTronLink, BANK_FEE_RATE, GASFREE_FEE, FLAGS, REASONS, type BatchView, type Precheck, type Row, type TypedDraft } from '../../../lib';
 import { Addr, Button, Callout, Card, Copy, ErrorLine, FlagChip, StatePill, Stat, TxLink, WaitingForTronLink } from '../../../ui';
+import { FlowMap } from '../../../flow-map';
 
 const LINK_BUTTON = 'inline-flex items-center rounded-[7px] border border-line px-3.5 py-2.5 text-xs font-semibold text-[#c8d1c7] transition hover:bg-raised';
 const STATUS_WORD: Record<string, string> = { REVIEW: 'in review', PAUSED: 'paused', CLOSED: 'closed', RUNNING: 'paying' };
-const EVENT_TONE = (t: string) => (/REFUSED|FAILED|STOP|REJECT/.test(t) ? 'text-stop' : /SUCCEED|SEALED|CLOSED|CONFIRMED/.test(t) ? 'text-celadon' : 'text-ink');
+const EVENT_TONE = (t: string) => (/REFUSED|FAILED|STOP|REJECT|FROZEN/.test(t) ? 'text-stop' : /SUCCEED|SEALED|CLOSED|CONFIRMED|APPROVED|RELEASED|FUNDED/.test(t) ? 'text-celadon' : 'text-ink');
 
 const MAPPED_BY: Record<string, string> = { kiln: 'Columns mapped by Kiln (gpt-oss-120b)', cache: 'Columns mapped from cache (0 tokens)', rules: 'Columns mapped by header rules' };
 
@@ -132,6 +133,9 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
   const total = pay.reduce((s, r) => s + (r.amount ?? 0), 0);
   const a = batch.approval;
   const approved = !!a && !approvalProblem;
+  const released = view.events.findLast((e) => e.type === 'VAULT_RELEASED');
+  const vaultRefused = view.events.findLast((e) => e.type === 'VAULT_REFUSED');
+  const vaultAmount = a && view.vault ? Number(a.value.total) + Number(a.value.count) * view.vault.feePerPayment : 0;
   const canApprove = batch.status === 'REVIEW' || batch.status === 'PAUSED';
 
   const approve = async (how: 'tronlink' | 'server') => {
@@ -165,10 +169,23 @@ function OwnerApproval({ view, reload }: { view: BatchView; reload: () => void }
       <div className="grid gap-3">
         <ErrorLine error={error} />
         {busy === 'tronlink' && <WaitingForTronLink />}
+        {vaultRefused && !released && <Callout tone="warn">The vault refused to release money: {String(vaultRefused.data.reason)}</Callout>}
         {approved ? (
-          <p className="text-[13px] text-muted">
-            <Addr a={a!.owner} /> approved <b className="text-ink">{a!.value.count} payments, {usdt(Number(a!.value.total))} USDT</b> on {when(a!.at)}, {a!.signedBy === 'server-demo-key' ? 'with the demo owner key' : 'in TronLink'}. Changing any row clears this approval.
-          </p>
+          <>
+            <p className="text-[13px] text-muted">
+              <Addr a={a!.owner} /> approved <b className="text-ink">{a!.value.count} payments, {usdt(Number(a!.value.total))} USDT</b> on {when(a!.at)}, {a!.signedBy === 'server-demo-key' ? 'with the demo owner key' : 'in TronLink'}. Changing any row clears this approval.
+            </p>
+            {view.vault && released && (
+              <p className="flex flex-wrap items-center gap-2 text-[13px] text-celadon">
+                The vault checked this signature on chain and released {usdt(Number(released.data.amount))} USDT. <TxLink hash={String(released.data.txid)} />
+              </p>
+            )}
+            {view.vault && !released && (
+              <p className="text-[13px] text-muted">
+                When you press Pay, AnsimVault checks this signature on chain and releases <b className="text-ink">{usdt(vaultAmount)} USDT</b>: the approved total plus {usdt(view.vault.feePerPayment)} USDT GasFree fee per payment.
+              </p>
+            )}
+          </>
         ) : (
           <>
             {approvalProblem && batch.approval && <Callout tone="warn">{approvalProblem}</Callout>}
@@ -354,8 +371,13 @@ export default function BatchPage() {
         </span>
       </div>
 
-      <OwnerApproval view={view} reload={load} />
-      <Savings view={view} />
+      <div className="grid items-start gap-[18px] lg:grid-cols-2">
+        <div className="grid min-w-0 gap-[18px]">
+          <OwnerApproval view={view} reload={load} />
+          <Savings view={view} />
+        </div>
+        <FlowMap title={`LIVE PAYOUT MAP · BATCH #${batch.id}`} payments={rows.filter((r) => r.decision === 'pay').map((r) => ({ id: r.id, country: r.country, amount: r.amount, state: r.state, label: r.name }))} />
+      </div>
 
       {pre && <Card eyebrow="GasFree account" title="Pre-check" action={<button type="button" className="text-xs text-celadon hover:underline" onClick={() => setPre(null)}>Hide</button>}><PrecheckPanel p={pre} /></Card>}
 

@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, usdt, when, waitText, signWithTronLink, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft } from '../lib';
+import { api, usdt, when, waitText, signWithTronLink, sendWithTronLink, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink, WaitingForTronLink } from '../ui';
+import { FlowMap, type FlowPayment } from '../flow-map';
 
 type Draft = TypedDraft & { id: number };
 
@@ -403,6 +404,103 @@ function ImportCard() {
   );
 }
 
+// The operator's USDT sits in AnsimVault. Money reaches the families only through an owner-approved release.
+function VaultCard() {
+  const [v, setV] = useState<Vault | null | undefined>(undefined);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => api<Vault | null>('/api/vault').then(setV).catch((e) => setError(e.message)), []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const run = async (name: string, action: () => Promise<Vault | null>) => {
+    setBusy(name);
+    setError(null);
+    try {
+      setV(await action());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const freeze = (frozen: boolean) =>
+    run('freeze', async () =>
+      v!.ownerIsDemoKey
+        ? api<Vault>('/api/vault/freeze', { json: { frozen } })
+        : api<Vault>('/api/vault/freeze', { json: { txid: await sendWithTronLink(v!.address, v!.abi, 'setFrozen', [frozen]) } }),
+    );
+
+  if (v === undefined) return <Card eyebrow="On-chain vault · AnsimVault" title="Vault"><ErrorLine error={error} /><p className="text-xs text-muted">Reading the vault on Nile…</p></Card>;
+  if (v === null) return <Card eyebrow="On-chain vault · AnsimVault" title="Vault"><Callout>No vault is deployed yet. Run npm run deploy:vault.</Callout></Card>;
+  return (
+    <Card
+      id="vault"
+      eyebrow="On-chain vault · AnsimVault"
+      title={v.frozen ? 'Vault frozen by the owner' : 'Vault'}
+      action={<Button kind={v.frozen ? 'primary' : 'danger'} busy={busy === 'freeze'} onClick={() => freeze(!v.frozen)}>{v.frozen ? 'Unfreeze vault' : 'Freeze vault'}</Button>}
+    >
+      <div className="grid gap-5">
+        <ErrorLine error={error} />
+        {v.frozen && <Callout tone="warn">No batch can take money from the vault until the owner unfreezes it.</Callout>}
+        <div className="rounded-lg border border-[#26382c] bg-sunken p-5">
+          <div className="flex flex-wrap justify-between gap-2 font-mono text-[9px] tracking-[0.1em] text-[#8ca492]">
+            <span>HELD BY THE CONTRACT</span>
+            <span>RELEASES ONLY OWNER-APPROVED BATCHES</span>
+          </div>
+          <div className="mt-5 flex flex-wrap items-baseline gap-x-3">
+            <span className="num text-[44px] leading-none tracking-[-0.04em]">{usdt(v.balance)}</span>
+            <span className="text-muted">USDT in the vault</span>
+          </div>
+          <ol className="mt-5 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 font-mono text-[10px]">
+            <li className="rounded-md border border-[#3f5a3d] bg-celadon-soft px-2.5 py-2 text-celadon">VAULT<span className="block text-[#c6d6bf]">{usdt(v.balance)}</span></li>
+            <li aria-hidden className="text-muted">→</li>
+            <li className="rounded-md border border-line px-2.5 py-2 text-[#c8d1c7]">GASFREE ACCOUNT<span className="block text-muted">{usdt(v.payoutBalance)}</span></li>
+            <li aria-hidden className="text-muted">→</li>
+            <li className="rounded-md border border-line px-2.5 py-2 text-[#c8d1c7]">FAMILIES<span className="block text-muted">no TRX needed</span></li>
+          </ol>
+        </div>
+        <div className="grid grid-cols-2 gap-y-4 sm:grid-cols-3">
+          <Stat label="Released so far" value={usdt(v.releasedTotal)} />
+          <Stat label="Approved batches" value={v.releases} />
+          <Stat label="Owner" value={<span className="text-sm"><Addr a={v.owner} /></span>} />
+        </div>
+        {v.payoutBalance > v.feePerPayment && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line px-3.5 py-3 text-xs text-muted">
+            <span>{usdt(v.payoutBalance)} USDT is sitting idle in the GasFree account.</span>
+            <Button kind="secondary" busy={busy === 'return'} onClick={() => run('return', () => api<Vault>('/api/vault/return', { json: {} }))}>Move it into the vault</Button>
+          </div>
+        )}
+        <p className="text-[11px] leading-relaxed text-muted">
+          The contract sends money only to the payer’s GasFree account, only for a batch the owner approved with a TIP-712 signature, once per approval, and never more than the approved total plus {usdt(v.feePerPayment)} USDT per payment. It checks the owner’s signature itself, so even a hacked Ansim server cannot take more than one approved batch.
+        </p>
+        <a href={tronscanAddress(v.address)} target="_blank" rel="noopener" className="w-fit text-xs text-celadon hover:underline">AnsimVault on TronScan ↗</a>
+      </div>
+    </Card>
+  );
+}
+
+// Recent payments across all batches, drawn from Seoul to each family's country.
+function RecentMap() {
+  const [payments, setPayments] = useState<FlowPayment[]>([]);
+  useEffect(() => {
+    let stop = false;
+    const tick = () => api<FlowPayment[]>('/api/payments/recent').then((p) => !stop && setPayments(p)).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, []);
+  return (
+    <Card eyebrow="Observable evidence · live" title="Where the money went">
+      <FlowMap payments={payments} />
+    </Card>
+  );
+}
+
 function Counter({ n }: { n: number }) {
   return <span className="rounded-[5px] border border-[#426443] bg-[#253929] px-2 py-1 font-mono text-[11px] text-celadon">{String(n).padStart(2, '0')}</span>;
 }
@@ -504,6 +602,10 @@ export default function Console() {
           <div className="grid items-start gap-[18px] lg:grid-cols-[minmax(0,1.8fr)_minmax(315px,1fr)]">
             <PolicyDesk status={status} policy={policy.policy} committed={policy.committed} reload={load} />
             <ImportCard />
+          </div>
+          <div className="mt-[18px] grid items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+            <VaultCard />
+            <RecentMap />
           </div>
           <div className="mt-[18px] grid items-start gap-[18px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <Boundary />

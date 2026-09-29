@@ -488,11 +488,14 @@ export function batchView(batchId: number) {
   const batch = getBatch(batchId);
   if (!batch) throw new Error('Batch not found.');
   const rows = batchRows(batchId);
+  const countries = new Map(payeeBook().map((p) => [p.address, p.country]));
+  const vault = vaultInfo();
   return {
+    vault: vault && { address: vault.address, feePerPayment: vault.feePerPayment },
     batch: { ...batch, columns: JSON.parse(batch.columns), receipt: batch.receipt ? JSON.parse(batch.receipt) : null, approval: batch.approval ? (JSON.parse(batch.approval) as Approval) : null },
     approvalProblem: batch.status === 'CLOSED' ? null : approvalProblem(batch),
     policy: batch.policy_id ? getPolicy(batch.policy_id) : null,
-    rows: rows.map(parseRow),
+    rows: rows.map((r) => ({ ...parseRow(r), country: countries.get(r.receiver) ?? null })),
     summary: summarize(rows),
     events: batchEvents(batchId).map((e) => ({ id: e.id, type: e.type, ts: e.ts_ms, hash: e.hash, data: JSON.parse(e.body).data })),
   };
@@ -539,6 +542,13 @@ export function exportCsv(batchId: number) {
       .join(','),
   );
   return '﻿' + [head.join(','), ...lines].join('\n');
+}
+
+// The latest payments across all batches, for the payout map on the home page.
+export function recentPayments() {
+  const countries = new Map(payeeBook().map((p) => [p.address, p.country]));
+  const rows = db.prepare("SELECT id, receiver, amount, state, name FROM rows WHERE decision = 'pay' ORDER BY id DESC LIMIT 60").all() as Pick<Row, 'id' | 'receiver' | 'amount' | 'state' | 'name'>[];
+  return rows.map((r) => ({ id: r.id, country: countries.get(r.receiver) ?? null, amount: r.amount, state: r.state, label: r.name }));
 }
 
 /* ---------------- family receipts & disputes ---------------- */

@@ -19,7 +19,7 @@ export type Row = {
   amount_raw: string | null; note: string | null; flags: string[]; agent: { ko: string; en: string; action: string } | null;
   decision: 'pay' | 'hold' | 'remove'; state: string; reason: string | null; request_id: string | null; trace_id: string | null;
   txn_hash: string | null; fee: number | null; max_fee: number | null; error: string | null;
-  receipt_token: string | null; travel: { originatorId: string; purpose: string } | null;
+  receipt_token: string | null; travel: { originatorId: string; purpose: string } | null; country: string | null;
 };
 export type Summary = { total: number; paid: number; failed: number; refused: number; held: number; ready: number; awaiting: number; amountPaid: number; fees: number };
 export type BatchEvent = { id: number; type: string; ts: number; hash: string; data: Record<string, unknown> };
@@ -27,9 +27,14 @@ export type Approval = { value: { batchId: string; policyId: string; rowsHash: s
 export type BatchView = {
   batch: { id: number; source: string; status: string; mapped_by: string; columns: Record<string, string>; receipt: { ko: string; en: string } | null; close_hash: string | null; anchor_tx: string | null; policy_id: number | null; approval: Approval | null };
   approvalProblem: string | null;
+  vault: { address: string; feePerPayment: number } | null;
   policy: Policy | null; rows: Row[]; summary: Summary; events: BatchEvent[]; running: boolean;
 };
 export type TypedDraft = { domain: object; types: object; value: Record<string, string> };
+export type Vault = {
+  address: string; owner: string; frozen: boolean; balance: number; payout: string; payoutBalance: number; feePerPayment: number;
+  agent: string; releasedTotal: number; releases: number; ownerIsDemoKey: boolean; abi: object[];
+};
 export type Precheck = {
   payer: string; gasFreeAddress: string; active: boolean; allowSubmit: boolean; nonce: number;
   token: { symbol: string; address: string; transferFee: number; activateFee: number };
@@ -74,8 +79,8 @@ const within = <T,>(p: Promise<T> | undefined, ms: number) =>
 const NILE_CHAIN_ID = '0xcd8690dc';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Signs TIP-712 typed data in TronLink. Used for the payment limits and for batch approvals.
-export async function signWithTronLink(draft: TypedDraft) {
+// Connects TronLink and makes sure it is on Nile. Returns its TronWeb and the connected address.
+async function connectTronLink() {
   const w = window as any;
   if (!w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
   if (w.tronLink?.request) await w.tronLink.request({ method: 'tron_requestAccounts' });
@@ -91,6 +96,12 @@ export async function signWithTronLink(draft: TypedDraft) {
   }
   const owner: string | undefined = tronWeb?.defaultAddress?.base58;
   if (!owner) throw new Error('Unlock TronLink and connect an account first.');
+  return { tronWeb, owner };
+}
+
+// Signs TIP-712 typed data in TronLink. Used for the payment limits and for batch approvals.
+export async function signWithTronLink(draft: TypedDraft) {
+  const { tronWeb, owner } = await connectTronLink();
   const sign = tronWeb.trx.signTypedData ?? tronWeb.trx._signTypedData;
   try {
     const signature: string = await sign.call(tronWeb.trx, draft.domain, draft.types, draft.value);
@@ -100,6 +111,13 @@ export async function signWithTronLink(draft: TypedDraft) {
     if (/chain ?id/i.test(text)) throw new Error('TronLink is on another network. Open TronLink, switch the network to Nile Testnet, then sign again.');
     throw e;
   }
+}
+
+// Sends a contract call from the TronLink account, for owner actions such as freezing the vault.
+export async function sendWithTronLink(address: string, abi: object[], method: string, args: unknown[]) {
+  const { tronWeb } = await connectTronLink();
+  const c = await tronWeb.contract(abi, address);
+  return (await c[method](...args).send({ feeLimit: 50_000_000 })) as string;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 export const tronscanAddress = (a: string) => `https://nile.tronscan.org/#/address/${a}`;
