@@ -1,0 +1,74 @@
+import { TronWeb } from 'tronweb';
+
+export type Payee = { address: string; name: string; usual: number }; // usual amount in base units
+export type ScreenRow = { line: number; sender: string; receiver: string; amount: number | null; note: string; flags: string[] };
+
+// Rows with these flags can never be paid, whatever the operator or the model says.
+export const BLOCKING = new Set(['INVALID_ADDRESS', 'INVALID_AMOUNT', 'TETHER_FROZEN', 'REPORTED_WALLET']);
+
+export const FLAG_INFO: Record<string, string> = {
+  INVALID_ADDRESS: 'Not a valid TRON address',
+  INVALID_AMOUNT: 'Amount is missing, zero or not a number',
+  DUPLICATE: 'Same sender, wallet, amount and note as an earlier row',
+  NEW_PAYEE: 'Wallet is not in the payee book',
+  LOOKALIKE: 'Looks like a known payee wallet but is a different one (address poisoning)',
+  UNUSUAL_AMOUNT: 'More than 3 times this payee’s usual amount',
+  REPORTED_WALLET: 'Wallet is on the reported scam list',
+  TETHER_FROZEN: 'Tether has frozen this wallet',
+  MANY_SENDERS_ONE_WALLET: 'Three or more different senders pay this one new wallet (possible money mule)',
+};
+
+const B58 = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+export const validAddress = (a: string) => B58.test(a) && TronWeb.isAddress(a);
+
+// Same first 4 and last 4 characters: what most wallets show when they shorten an address.
+export const looksAlike = (a: string, b: string) => a !== b && a.slice(0, 4) === b.slice(0, 4) && a.slice(-4) === b.slice(-4);
+
+// All checks are plain code. Only rows they flag are sent to the model for an explanation.
+export async function screen(
+  rows: ScreenRow[],
+  book: Map<string, Payee>,
+  reported: Set<string>,
+  isFrozen: (address: string) => Promise<boolean | null>,
+) {
+  const seen = new Set<string>();
+  const senders = new Map<string, Set<string>>();
+  const known = [...book.keys()];
+
+  for (const r of rows) {
+    r.flags = [];
+    const flag = (f: string) => r.flags.push(f);
+    if (r.amount === null || !(r.amount > 0)) flag('INVALID_AMOUNT');
+    if (!validAddress(r.receiver)) {
+      flag('INVALID_ADDRESS');
+      continue;
+    }
+    const key = `${r.sender.trim().toLowerCase()}|${r.receiver}|${r.amount}|${r.note}`;
+    if (seen.has(key)) flag('DUPLICATE');
+    seen.add(key);
+    const payee = book.get(r.receiver);
+    if (!payee) {
+      flag('NEW_PAYEE');
+      if (known.some((a) => looksAlike(a, r.receiver))) flag('LOOKALIKE');
+    } else if (r.amount !== null && payee.usual > 0 && r.amount > 3 * payee.usual) {
+      flag('UNUSUAL_AMOUNT');
+    }
+    if (reported.has(r.receiver)) flag('REPORTED_WALLET');
+    if (!senders.has(r.receiver)) senders.set(r.receiver, new Set());
+    senders.get(r.receiver)!.add(r.sender.trim().toLowerCase());
+  }
+
+  for (const r of rows) {
+    if (!book.has(r.receiver) && (senders.get(r.receiver)?.size ?? 0) >= 3) r.flags.push('MANY_SENDERS_ONE_WALLET');
+  }
+
+  const unique = [...new Set(rows.filter((r) => validAddress(r.receiver)).map((r) => r.receiver))];
+  // One at a time: public TronGrid rate-limits bursts of calls.
+  const frozen = new Map<string, boolean | null>();
+  for (const a of unique) {
+    frozen.set(a, await isFrozen(a));
+    await new Promise((r) => setTimeout(r, process.env.TRONGRID_API_KEY ? 50 : 350));
+  }
+  for (const r of rows) if (frozen.get(r.receiver)) r.flags.push('TETHER_FROZEN');
+  return { freezeCheckFailed: [...frozen.values()].some((v) => v === null) };
+}

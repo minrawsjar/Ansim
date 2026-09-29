@@ -1,0 +1,126 @@
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Amounts are integers in USDT base units (6 decimals). Times are unix seconds unless named *_ms.
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS policies (
+  id INTEGER PRIMARY KEY,
+  payer TEXT NOT NULL,
+  owner TEXT,
+  budget INTEGER NOT NULL,
+  per_payment INTEGER NOT NULL,
+  payees TEXT NOT NULL,
+  payees_hash TEXT NOT NULL,
+  deadline INTEGER NOT NULL,
+  policy_nonce INTEGER NOT NULL,
+  signature TEXT,
+  signed_by TEXT,
+  policy_hash TEXT,
+  anchor_tx TEXT,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS batches (
+  id INTEGER PRIMARY KEY,
+  policy_id INTEGER,
+  source TEXT NOT NULL,
+  columns TEXT NOT NULL,
+  mapped_by TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'REVIEW',
+  receipt TEXT,
+  close_hash TEXT,
+  anchor_tx TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rows (
+  id INTEGER PRIMARY KEY,
+  batch_id INTEGER NOT NULL,
+  line INTEGER NOT NULL,
+  sender TEXT, name TEXT, receiver TEXT NOT NULL, amount INTEGER, amount_raw TEXT, note TEXT,
+  flags TEXT NOT NULL DEFAULT '[]',
+  agent TEXT,
+  decision TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'READY',
+  reason TEXT,
+  permit TEXT, nonce INTEGER, deadline INTEGER, max_fee INTEGER,
+  trace_id TEXT, txn_hash TEXT, fee INTEGER, error TEXT,
+  signed_at_ms INTEGER,
+  updated_at_ms INTEGER
+);
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  batch_id INTEGER,
+  row_id INTEGER,
+  body TEXT NOT NULL,
+  prev TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tokens (
+  id INTEGER PRIMARY KEY,
+  ts_ms INTEGER NOT NULL,
+  flow TEXT NOT NULL,
+  batch_id INTEGER,
+  call_id TEXT,
+  prompt INTEGER, completion INTEGER, total INTEGER,
+  ms INTEGER,
+  effort TEXT
+);
+CREATE TABLE IF NOT EXISTS column_maps (signature TEXT PRIMARY KEY, mapping TEXT NOT NULL);
+`;
+
+export type Policy = {
+  id: number; payer: string; owner: string | null; budget: number; per_payment: number;
+  payees: string; payees_hash: string; deadline: number; policy_nonce: number;
+  signature: string | null; signed_by: string | null; policy_hash: string | null; anchor_tx: string | null;
+  status: 'DRAFT' | 'ACTIVE' | 'STOPPED' | 'REPLACED'; created_at: number;
+};
+
+export type Batch = {
+  id: number; policy_id: number | null; source: string; columns: string; mapped_by: string;
+  status: 'REVIEW' | 'RUNNING' | 'PAUSED' | 'CLOSED'; receipt: string | null;
+  close_hash: string | null; anchor_tx: string | null; created_at: number;
+};
+
+export type Row = {
+  id: number; batch_id: number; line: number;
+  sender: string | null; name: string | null; receiver: string; amount: number | null; amount_raw: string | null; note: string | null;
+  flags: string; agent: string | null; decision: 'pay' | 'hold' | 'remove';
+  state: string; reason: string | null;
+  permit: string | null; nonce: number | null; deadline: number | null; max_fee: number | null;
+  trace_id: string | null; txn_hash: string | null; fee: number | null; error: string | null;
+  signed_at_ms: number | null; updated_at_ms: number | null;
+};
+
+function open() {
+  const file = process.env.ANSIM_DB ?? fileURLToPath(new URL('../data/ansim.db', import.meta.url));
+  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
+  const d = new Database(file);
+  d.pragma('journal_mode = WAL');
+  d.exec(SCHEMA);
+  return d;
+}
+
+// One connection per server process, kept across dev hot reloads.
+const g = globalThis as unknown as { __ansimDb?: Database.Database };
+export const db = (g.__ansimDb ??= open());
+
+export const nowSec = () => Math.floor(Date.now() / 1000);
+
+export const getPolicy = (id: number) => db.prepare('SELECT * FROM policies WHERE id = ?').get(id) as Policy | undefined;
+export const activePolicy = () =>
+  db.prepare("SELECT * FROM policies WHERE status IN ('ACTIVE','STOPPED') ORDER BY id DESC LIMIT 1").get() as Policy | undefined;
+export const getBatch = (id: number) => db.prepare('SELECT * FROM batches WHERE id = ?').get(id) as Batch | undefined;
+export const getRow = (id: number) => db.prepare('SELECT * FROM rows WHERE id = ?').get(id) as Row;
+export const batchRows = (batchId: number) =>
+  db.prepare('SELECT * FROM rows WHERE batch_id = ? ORDER BY line').all(batchId) as Row[];
+
+export function updateRow(id: number, fields: Partial<Row>) {
+  const keys = Object.keys(fields);
+  if (!keys.length) return;
+  const set = keys.map((k) => `${k} = @${k}`).join(', ');
+  db.prepare(`UPDATE rows SET ${set}, updated_at_ms = @now WHERE id = @id`).run({ ...fields, id, now: Date.now() });
+}
