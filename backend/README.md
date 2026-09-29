@@ -35,6 +35,7 @@ Hono (/api) ── desk.ts ──┬── screen.ts ── the 12 checks, walle
 | [`log.ts`](src/log.ts) | Appends events whose hash covers the previous one, and checks the chain |
 | [`alerts.ts`](src/alerts.ts) | Telegram messages to the owner chats, and family notices when their payment lands |
 | [`telegram.ts`](src/telegram.ts) | Webhook updates: `o_<code>` links an owner chat, `r_<token>` links a family's receipt, `/stop` unsubscribes |
+| [`join.ts`](src/join.ts) | The live demo: phones join as families, the operator accepts them, and a phone's own signed GasFree permit sends USDT back to the vault |
 | [`db.ts`](src/db.ts) | SQLite schema and column migrations |
 | [`env.ts`](src/env.ts) | Loads `.env.local` |
 | [`core.test.ts`](src/core.test.ts) | 11 tests: the policy gate, the 30-day cap, payee and row hashes, screening, new contacts, wallet risk, Korean headers, the hash chain, CSV formula cells |
@@ -87,6 +88,13 @@ Everything is under `/api`. With `BACKEND_KEY` set, every request except `/healt
 | POST | `/telegram/link` | A one-time code for linking an owner chat |
 | GET | `/telegram` | Bot name and number of owner chats |
 | POST | `/alerts/test` | Sends a test alert |
+| POST | `/join` | Live demo, public: a phone asks to join as a family with its own wallet address |
+| GET | `/join/:token` | Live demo, public: the phone's status, payment, balance and local-currency rate |
+| GET | `/join/:token/send-back` | Live demo, public: the unsigned GasFree permit to send the phone's USDT back to the vault |
+| POST | `/join/:token/send-back` | Live demo, public: relays the phone-signed permit (only from that phone, only to the vault) |
+| GET | `/joins` | Everyone who joined, for the stage screen |
+| POST | `/joins/:token/accept` | Adds the phone's GasFree account as a contact, through the usual checks |
+| POST | `/joins/:token/reject` | Rejects a join |
 
 ## Environment
 
@@ -124,6 +132,7 @@ SQLite through better-sqlite3, in WAL mode.
 | `column_maps` | Cached column mappings by header signature |
 | `payees` | Contacts with their usual amount, wallet risk and city |
 | `telegram_chats`, `telegram_codes` | Linked owner chats and one-time link codes |
+| `joins` | Live-demo phones: wallet, GasFree account, name, city, status, and the transfer back |
 | `meta` | This database's registry namespace and other settings |
 
 ## Events
@@ -139,6 +148,7 @@ Every event's hash covers the previous event's hash, so editing or removing one 
 | Rows | `ROW_REFUSED`, `ROW_SIGNED`, `ROW_SUBMITTED`, `ROW_STATE`, `ROW_FAILED`, `REJECTED_BY_GASFREE`, `ROW_ERROR`, `ROW_TIMEOUT` |
 | Recovery | `ROW_SUBMIT_LOST`, `ROW_SUBMIT_UNKNOWN`, `ROW_RESENT`, `ROW_RESEND_REJECTED`, `ROW_RECOVERED`, `ROW_PERMIT_EXPIRED`, `ROW_PERMIT_DROPPED` |
 | Family | `RECEIPT_CONFIRMED` |
+| Live demo | `JOIN_REQUESTED`, `JOIN_ACCEPTED`, `JOIN_REJECTED`, `JOIN_SEND_BACK_SUBMITTED`, `JOIN_SENT_BACK` |
 
 ## Scripts
 

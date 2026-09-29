@@ -74,8 +74,8 @@ export async function gasfreeConfig() {
   return cached;
 }
 
-const domain = { name: 'GasFreeController', version: 'V1.0.0', chainId: NILE_CHAIN_ID, verifyingContract: CONTROLLER };
-const types = {
+export const permitDomain = { name: 'GasFreeController', version: 'V1.0.0', chainId: NILE_CHAIN_ID, verifyingContract: CONTROLLER };
+export const permitTypes = {
   PermitTransfer: [
     { name: 'token', type: 'address' }, { name: 'serviceProvider', type: 'address' },
     { name: 'user', type: 'address' }, { name: 'receiver', type: 'address' },
@@ -95,6 +95,6 @@ export type Permit = {
 // so GasFree's controller contract cannot charge more or execute later than this.
 export async function signPermit(m: Omit<Permit, 'version' | 'sig' | 'requestId'>, privateKey: string): Promise<Permit> {
   const message = { ...m, version: 1 };
-  const sig = await tw.trx.signTypedData(domain, types, message, privateKey);
+  const sig = await tw.trx.signTypedData(permitDomain, permitTypes, message, privateKey);
   return { requestId: crypto.randomUUID(), ...message, sig: sig.replace(/^0x/, '') };
 }

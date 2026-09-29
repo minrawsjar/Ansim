@@ -16,6 +16,8 @@ Live at **https://ansim-ecru.vercel.app**.
 | `/disputes` | [`app/(console)/disputes/page.tsx`](app/%28console%29/disputes/page.tsx) | Support | Finds a payment, shows the chain's own proof, and drafts a reply |
 | `/metrics` | [`app/(console)/metrics/page.tsx`](app/%28console%29/metrics/page.tsx) | Judges and the operator | Tokens, latency and energy by AI flow, with the model and provider |
 | `/r/[token]` | [`app/r/[token]/page.tsx`](app/r/[token]/page.tsx) | The family | Their receipt in Vietnamese, Tagalog or Nepali with English (plus Korean), "I received it", and an optional city |
+| `/stage` | [`app/(console)/stage/page.tsx`](app/%28console%29/stage/page.tsx) | Operator, on the big screen | Live demo: the join QR code, everyone who joined on the map, accept, add to the signed limits, draft, and watch payments and transfers back |
+| `/join` | [`app/join/page.tsx`](app/join/page.tsx) | Anyone in the room | Live demo, no password: the phone makes its own TRON wallet ([`wallet.ts`](app/join/wallet.ts)), joins as a family, watches the payment arrive in its language and local currency, and signs a GasFree permit to send it back |
 
 `(console)` is a route group. Its [`layout.tsx`](app/%28console%29/layout.tsx) adds the header, the navigation and **Connect TronLink**. The receipt page has neither, and a family never sees the console.
 

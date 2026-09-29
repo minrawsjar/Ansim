@@ -443,6 +443,20 @@ Open https://ansim-ecru.vercel.app, press **Connect TronLink** and switch to Nil
 5. **Prove it:** export the evidence, run verify, then verify a tampered copy.
 6. **The family's side:** open a row's **Family receipt**, press **I received it**, and share a city.
 
+### Live Demo: The Audience Becomes the Families
+
+Open **Live demo** (`/stage`) on the big screen. People scan the QR code, and each phone makes its own TRON wallet with 0 TRX. The key stays on the phone. They pick a name and a city in Vietnam, the Philippines or Nepal, and appear on the map.
+
+1. **Accept** them. Each wallet goes through the same checks as any new contact.
+2. **Add them to the signed limits.** Same budget and caps, signed again in TronLink.
+3. **Ask the agent** to send everyone who joined a few USDT.
+4. **Approve and pay.** The owner signs the exact rows and the vault releases them.
+5. **Watch the phones.** Each one chimes, buzzes and shows the amount in local currency, in its language, with the TronScan proof. Then press **Send it back**: the phone signs a GasFree permit itself, and a wallet that has never held TRX sends USDT back into the vault.
+
+Payments go to each phone's GasFree account, so it can spend with GasFree. The first transfer out costs 1.00 USDT once to open the account, plus the 0.30 fee, taken from the USDT. So pay at least 2 USDT. GasFree takes one transfer at a time, about a minute each, so it suits 3 to 5 people.
+
+Tested on Nile: a wallet made by the phone page, with 0 TRX, received 3.00 USDT in its GasFree account. It then sent 1.70 back to the vault with a phone-signed permit ([3a8a60d1…f47015](https://nile.tronscan.org/#/transaction/3a8a60d1b9593c07d050af78d6d6ecc867cc325177fb6ed7ef28229ae9f47015)); GasFree took 1.30 for the fee and the one-time activation.
+
 ### Boundary runs
 
 | Run | Condition | Expected outcome |

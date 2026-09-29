@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS column_maps (signature TEXT PRIMARY KEY, mapping TEXT
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS telegram_chats (chat_id INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL DEFAULT '', name TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (chat_id, kind, ref));
 CREATE TABLE IF NOT EXISTS telegram_codes (code TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS joins (
+  token TEXT PRIMARY KEY,
+  address TEXT NOT NULL UNIQUE,
+  wallet TEXT NOT NULL,
+  name TEXT NOT NULL,
+  country TEXT NOT NULL,
+  city TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  sent_back TEXT,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS payees (
   address TEXT PRIMARY KEY,
   name TEXT NOT NULL,

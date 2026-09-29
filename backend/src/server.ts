@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { db, activePolicy, getBatch } from './db';
 import { isRunning, recoverBatch, precheck, committed, resumeRuns } from './orchestrator';
+import { requestJoin, joinStatus, sendBackDraft, sendBack, listJoins, acceptJoin, rejectJoin } from './join';
 import { sendTelegram, telegramConfigured } from './alerts';
 import { handleUpdate, ownerLink, ownerChatCount, botUsername, registerWebhook, webhookSecret } from './telegram';
 import { usdtTransferProof } from './tron';
@@ -167,6 +168,16 @@ app.get('/payments', (c) => {
   c.header('Content-Disposition', 'attachment; filename="ansim-payments.csv"');
   return c.body(paymentsCsv());
 });
+// Live demo. /join/* is public (the frontend lets it through without the site password): the join token is
+// the phone's key to its own status, and sending back needs the phone's own signature. /joins/* is the operator's.
+app.post('/join', async (c) => c.json(await requestJoin(await c.req.json().catch(() => ({})))));
+app.get('/join/:token', async (c) => c.json(await joinStatus(c.req.param('token'))));
+app.get('/join/:token/send-back', async (c) => c.json(await sendBackDraft(c.req.param('token'))));
+app.post('/join/:token/send-back', async (c) => c.json(await sendBack(c.req.param('token'), await c.req.json().catch(() => ({})))));
+app.get('/joins', async (c) => c.json(await listJoins()));
+app.post('/joins/:token/accept', async (c) => c.json(await acceptJoin(c.req.param('token'))));
+app.post('/joins/:token/reject', async (c) => c.json(await rejectJoin(c.req.param('token'))));
+
 app.get('/payments/:id/receipt', (c) => {
   const rowId = id(c.req.param('id'));
   const html = paymentReceipt(rowId);

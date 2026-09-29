@@ -302,6 +302,7 @@ export async function planBatch(instruction: string) {
   if (!policy || policy.status !== 'ACTIVE') throw new Error('Sign the payment limits first. The agent only drafts payments the owner’s limits allow.');
   if (!contacts.some((c) => allowed.includes(c.address))) throw new Error('The signed limits allow none of your current contacts. Tick the contacts, sign new limits, then ask again.');
   const lastSender = db.prepare("SELECT sender FROM rows WHERE receiver = ? AND sender IS NOT NULL AND sender != '' ORDER BY id DESC LIMIT 1");
+  const joined = new Set((db.prepare("SELECT wallet FROM joins WHERE status = 'accepted'").all() as { wallet: string }[]).map((j) => j.wallet));
   const input = {
     today: new Date().toISOString().slice(0, 10),
     instruction: text,
@@ -310,7 +311,7 @@ export async function planBatch(instruction: string) {
       : null,
     contacts: contacts.map((c) => ({
       name: c.name, country: c.country, address: c.address, usualUSDT: c.usual, last30dUSDT: payeeMonth(c.address) / 1e6,
-      isNew: !!c.created_at && nowSec() - c.created_at < rules.waitSec, walletRisk: c.risk?.level ?? 'unchecked', allowedByLimits: allowed.includes(c.address),
+      isNew: !!c.created_at && nowSec() - c.created_at < rules.waitSec, walletRisk: c.risk?.level ?? 'unchecked', allowedByLimits: allowed.includes(c.address), joinedLive: joined.has(c.address),
     })),
   };
   const plan = await ask<Plan>('plan', PROMPTS.plan, input, { maxTokens: 1500 });
@@ -595,7 +596,7 @@ export async function askAuditor(batchId: number, question: string) {
 const requestIdOf = (r: Row) => (r.permit ? (JSON.parse(r.permit).requestId as string | undefined) ?? null : null);
 
 // Each row to pay gets an unguessable link for the family's receipt page, made the first time it is needed.
-function receiptToken(r: Row) {
+export function receiptToken(r: Row) {
   if (r.decision !== 'pay') return null;
   if (r.receipt_token) return r.receipt_token;
   const token = randomBytes(12).toString('base64url');
@@ -783,7 +784,7 @@ footer{margin-top:28px;padding-top:14px;border-top:1px solid #d5ddd4;font-size:1
 </main></body></html>`;
 }
 
-const paidAtMs = (rowId: number) =>
+export const paidAtMs = (rowId: number) =>
   (db
     .prepare(`SELECT ts_ms FROM events WHERE row_id = ? AND (type = 'ROW_RECOVERED' OR (type = 'ROW_STATE' AND body LIKE '%"state":"SUCCEED"%')) ORDER BY id DESC LIMIT 1`)
     .get(rowId) as { ts_ms: number } | undefined)?.ts_ms ?? null;

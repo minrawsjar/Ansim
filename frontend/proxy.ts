@@ -12,10 +12,12 @@ const sameText = (a: string, b: string) => {
 
 // A family opens their receipt without the site password. The unguessable token in the link is the key.
 const isReceipt = (path: string) => /^\/r\/[\w-]+$/.test(path) || /^\/api\/receipts\/[\w-]+(\/confirm)?$/.test(path);
+// Live demo: people in the room join from their phones. Their join token and their own signature are the keys.
+const isJoin = (path: string) => path === '/join' || /^\/api\/join(\/[\w-]+(\/send-back)?)?$/.test(path);
 
 export function proxy(req: NextRequest) {
   const password = process.env.SITE_PASSWORD;
-  if (password && !isReceipt(req.nextUrl.pathname)) {
+  if (password && !isReceipt(req.nextUrl.pathname) && !isJoin(req.nextUrl.pathname)) {
     const auth = req.headers.get('authorization') ?? '';
     let given = '';
     try {

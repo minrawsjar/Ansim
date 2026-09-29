@@ -19,6 +19,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             <Link href="/#limits" className="hover:text-celadon">Payment limits</Link>
             <Link href="/#batches" className="hover:text-celadon">Batches</Link>
             <Link href="/payments" className="hover:text-celadon">Payments</Link>
+            <Link href="/stage" className="text-celadon hover:underline">Live demo</Link>
             <Link href="/disputes" className="hover:text-celadon">Disputes</Link>
             <Link href="/metrics" className="hover:text-celadon">Tokens &amp; energy</Link>
             <a href={REPO} target="_blank" rel="noopener" className="hover:text-celadon">Source ↗</a>
