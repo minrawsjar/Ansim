@@ -340,7 +340,14 @@ export async function planBatch(instruction: string) {
   })();
   await rescreen(batchId);
   for (const r of batchRows(batchId)) if (JSON.parse(r.flags).length) updateRow(r.id, { decision: 'hold' });
-  logEvent('AGENT_PLANNED', { instruction: text, model: MODEL, proposed: kept.length, dropped, summary: plan?.summary ?? null }, batchId);
+  // The model drafts what was asked. Code states exactly what the signed limits will refuse, so the owner can raise them first.
+  const fee = vaultInfo()?.feePerPayment ?? 300_000;
+  const pay = batchRows(batchId).filter((r) => r.decision === 'pay');
+  const limits = {
+    needUSDT: pay.reduce((s, r) => s + (r.amount ?? 0) + fee, 0) / 1e6, leftUSDT: (policy.budget - committedFor(policy.id)) / 1e6,
+    capUSDT: policy.per_payment / 1e6, overCap: pay.filter((r) => (r.amount ?? 0) > policy.per_payment).length,
+  };
+  logEvent('AGENT_PLANNED', { instruction: text, model: MODEL, proposed: kept.length, dropped, summary: plan?.summary ?? null, limits }, batchId);
   return { id: batchId, summary: plan?.summary ?? null, dropped };
 }
 

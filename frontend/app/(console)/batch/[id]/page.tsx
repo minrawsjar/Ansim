@@ -349,6 +349,7 @@ export default function BatchPage() {
         const planned = events.find((e) => e.type === 'AGENT_PLANNED');
         const summary = planned?.data.summary as { ko: string; en: string } | null | undefined;
         const dropped = (planned?.data.dropped as unknown[] | undefined)?.length ?? 0;
+        const limits = planned?.data.limits as { needUSDT: number; leftUSDT: number; capUSDT: number; overCap: number } | undefined;
         // The model's summary describes the draft ("not yet approved"), so it is only shown while the batch is in review.
         return planned && review ? (
           <Callout>
@@ -357,6 +358,8 @@ export default function BatchPage() {
               {summary && <span>{summary.ko}</span>}
               {summary && <span className="text-muted">{summary.en}</span>}
               {dropped > 0 && <span className="text-warn">Code dropped {dropped} proposed {dropped === 1 ? 'row' : 'rows'} that were not valid payments to contacts.</span>}
+              {limits && limits.needUSDT > limits.leftUSDT && <span className="text-warn">This draft needs {limits.needUSDT.toFixed(2)} USDT with fees, but the signed limits have {limits.leftUSDT.toFixed(2)} USDT left. Press Change limits on the payout desk to raise the budget, or Ansim refuses the payments that do not fit.</span>}
+              {limits && limits.overCap > 0 && <span className="text-warn">{limits.overCap} {limits.overCap === 1 ? 'payment is' : 'payments are'} above the {limits.capUSDT.toFixed(2)} USDT cap per payment and will be refused.</span>}
             </span>
           </Callout>
         ) : null;
