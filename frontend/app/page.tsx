@@ -59,6 +59,8 @@ function PolicyCard({ status, policy, committed, reload }: { status: Status; pol
     setBusy(how);
     setError(null);
     try {
+      const w = window as any;
+      if (how === 'tronlink' && !w.tronLink && !w.tronWeb) throw new Error('TronLink is not installed in this browser. Use the demo owner key instead.');
       const draft = await api<Draft>('/api/policy/draft', { json: { budget: Number(budget), perPayment: Number(cap), deadline: Math.floor(new Date(deadline).getTime() / 1000), payees: allowed } });
       const body = how === 'server' ? { id: draft.id, serverSign: true } : { id: draft.id, ...(await signWithTronLink(draft)) };
       await api('/api/policy/activate', { json: body });
@@ -233,6 +235,7 @@ export default function Console() {
         {status && <Setup s={status} />}
       </div>
       <ErrorLine error={error} />
+      {!status && !error && <p className="text-muted">Loading…</p>}
       {status && (
         <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
           <PolicyCard status={status} policy={policy.policy} committed={policy.committed} reload={load} />

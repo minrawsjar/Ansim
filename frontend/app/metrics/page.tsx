@@ -33,6 +33,7 @@ export default function MetricsPage() {
         <p className="max-w-3xl text-muted">Every Kiln call is logged under the flow that made it. Rules, limits and refusals run in code, so they cost no tokens.</p>
       </div>
       <ErrorLine error={error} />
+      {!m && !error && <p className="text-muted">Loading…</p>}
       {m && (
         <>
           <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-5">

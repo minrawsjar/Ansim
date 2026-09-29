@@ -38,12 +38,13 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     ...(json !== undefined ? { method: rest.method ?? 'POST', body: JSON.stringify(json), headers: { 'Content-Type': 'application/json' } } : {}),
   });
   const data = await res.json().catch(() => ({ error: `Server returned ${res.status}` }));
-  if (!res.ok || (data && typeof data === 'object' && 'error' in data)) throw new Error((data as { error: string }).error);
+  // Backend errors always come back as HTTP 400 with { error }. Rows also have an `error` field, so check the status.
+  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Server returned ${res.status}`);
   return data as T;
 }
 
 export const usdt = (n: number | null | undefined) => (n == null ? '–' : (n / 1e6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-export const when = (sec: number) => new Date(sec * 1000).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+export const when = (sec: number) => new Date(sec * 1000).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 export const tronscanTx = (h: string) => `https://nile.tronscan.org/#/transaction/${h}`;
 export const tronscanAddress = (a: string) => `https://nile.tronscan.org/#/address/${a}`;
 
