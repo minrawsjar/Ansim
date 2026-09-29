@@ -48,7 +48,7 @@ Payments cannot happen twice. Each row is bound to one nonce and one signed perm
 |---|---|
 | [`frontend/`](frontend) | Next.js operator console: policy signing, import, review, payment status, audit, metrics |
 | [`backend/`](backend) | Hono API: GasFree client, policy gate, screening, orchestrator, Kiln agent, event log |
-| [`backend/scripts/`](backend/scripts) | `setup.mjs` wallets and demo data, `verify.mjs` independent auditor, `fake-gasfree.mjs` local test stand-in |
+| [`backend/scripts/`](backend/scripts) | `setup.mjs` wallets and demo data, `verify.mjs` independent auditor, `fake-services.mjs` local GasFree and Kiln stand-ins for testing |
 | [`contracts/`](contracts) | `AnsimRegistry.sol`: policy grants, stops and batch seals on Nile. It never holds money |
 
 ## Run it
@@ -133,7 +133,7 @@ How the design avoids inference:
 
 - All code in this repository was written during the hackathon, on 29 and 30 September 2026. The frontend started from `create-next-app`.
 - The reported-wallet list is a stand-in for wallets reported to police and exchanges.
-- `fake-gasfree.mjs` exists only to test the payment logic without a GasFree key. Its transaction hashes are made up, and `verify.mjs` correctly fails them against the chain.
+- `fake-services.mjs` exists only to test the payment and AI logic without keys. Its transaction hashes are made up, and `verify.mjs` correctly fails them against the chain. Its AI replies are marked [fake].
 - Unlicensed crypto remittance is illegal in Korea. Ansim is built for licensed operators and adds the controls regulators ask for.
 
 ## Sources

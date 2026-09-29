@@ -1,8 +1,11 @@
-// Local stand-in for the GasFree API, for testing Ansim without a GasFree key. Never use it for a demo:
-// its transaction hashes are made up, and verify.mjs will rightly fail them against the chain.
-// It checks request signing headers and the TIP-712 permit signature, enforces nonces, and walks each
-// transfer through WAITING → INPROGRESS → CONFIRMING → SUCCEED over a few seconds.
-// Usage: node scripts/fake-gasfree.mjs   (listens on :4100, base URL http://localhost:4100/nile/)
+// Local stand-ins for GasFree and Kiln, for testing Ansim without keys. Never use them for a demo:
+// the transaction hashes are made up (verify.mjs rightly fails them against the chain), and the
+// "AI" replies are canned text marked [fake].
+// GasFree: checks request signing headers and the TIP-712 permit signature, enforces nonces, and walks
+// each transfer through WAITING → INPROGRESS → CONFIRMING → SUCCEED over a few seconds.
+// Kiln: answers /v1/chat/completions with JSON in the shape each Ansim flow expects.
+// Usage: node scripts/fake-services.mjs
+//   GASFREE_BASE=http://localhost:4100/nile/  KILN_BASE_URL=http://localhost:4100/v1
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { TronWeb } from 'tronweb';
@@ -36,9 +39,33 @@ function advance(t) {
   return t;
 }
 
+async function fakeKiln(req, res) {
+  let raw = '';
+  for await (const c of req) raw += c;
+  const body = JSON.parse(raw);
+  const system = body.messages[0].content;
+  const input = JSON.parse(body.messages[1].content);
+  let out;
+  if (system.includes('map the columns')) {
+    const pick = (re) => input.header.find((h) => re.test(h)) ?? null;
+    out = { receiver: pick(/지갑|wallet|address/i), amount: pick(/금액|amount/i), sender: pick(/송금인|sender/i), name: input.header.find((h) => /수취인|recipient/i.test(h) && !/지갑/.test(h)) ?? null, note: pick(/비고|note/i) };
+  } else if (system.includes('check a USDT payout batch')) {
+    out = { rows: input.rows.map((r) => ({ line: r.line, ko: `[fake] ${r.flags.join(', ')} 확인이 필요합니다.`, en: `[fake] Check ${r.flags.join(', ')}.`, action: r.flags.includes('UNUSUAL_AMOUNT') && r.flags.length === 1 ? 'pay' : 'hold' })) };
+  } else if (system.includes('receipt')) {
+    out = { ko: `[fake] ${input.paidCount}건, ${input.amountPaidUSDT} USDT 지급 완료.`, en: `[fake] Paid ${input.paidCount} rows, ${input.amountPaidUSDT} USDT.` };
+  } else {
+    out = { answer: `[fake] ${input.events.length} events in the log. See [#${input.events.at(-1)?.id ?? 0}].` };
+  }
+  const content = JSON.stringify(out);
+  const prompt = Math.ceil(raw.length / 4);
+  const completion = Math.ceil(content.length / 4);
+  res.end(JSON.stringify({ id: 'fake-' + randomBytes(6).toString('hex'), object: 'chat.completion', model: body.model, choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion } }));
+}
+
 http
   .createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/v1/chat/completions') return fakeKiln(req, res);
     if (!req.headers.authorization?.startsWith('ApiKey ') || !req.headers.timestamp) return res.end('Authorization or timestamp not found.');
     const path = req.url.replace(/^\/nile/, '');
     let body = '';
@@ -76,4 +103,4 @@ http
     if (m && transfers.has(m[1])) return ok(res, advance(transfers.get(m[1])));
     return fail(res, 'NotFound', path);
   })
-  .listen(4100, () => console.log('Fake GasFree on http://localhost:4100/nile/'));
+  .listen(4100, () => console.log('Fake GasFree on http://localhost:4100/nile/ and fake Kiln on http://localhost:4100/v1'));
