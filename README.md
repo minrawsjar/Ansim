@@ -1,217 +1,477 @@
 # Ansim 안심
 
-**Ansim is a wallet and approval tool: an AI payout agent that pays USDT batches on TRON through GasFree only inside a budget, payee list and deadline the owner signed, from an on-chain vault that releases money only for batches the owner approved, and records every payment and refusal so anyone can audit it.**
+### Payouts, inside the signed line
 
-안심 means “peace of mind”. Korean banks use the word for their fraud-blocking services.
+**Declared function:** Ansim is a wallet and approval tool: an AI payout agent that pays USDT batches on TRON through GasFree only inside a budget, payee list and deadline the owner signed, from an on-chain vault that releases money only for batches the owner approved, and records every payment and refusal so anyone can audit it.
 
-Built at GWDC 2026 Korea for **TRON Challenge C** (GasFree batch payments and reconciliation) and **FuriosaAI × Bricksum Challenge B** (controls and records for an AI agent that spends).
+안심 means "peace of mind". Korean banks use the word for their fraud-blocking services.
 
-## The problem
+[Architecture](#architecture) • [How It Works](#how-it-works) • [Protection](#multi-layer-protection) • [Contracts](#contracts) • [Getting Started](#getting-started) • [Demo](#demo) • [Partners](#partners) • [License](#license)
 
-About 1.1 million foreign workers in Korea send money home every month, and the Korea to Vietnam route averages 5.15% in fees. USDT on TRON is cheaper and is what many of their families already use. But a receiving wallet needs TRX to move USDT, and the same rail is how voice-phishing money leaves Korea: the National Police Agency counted ₩1.26 trillion in losses in 2025. From 1 October 2026, crypto exchanges share the refund duty for these losses.
+| | |
+|---|---|
+| Live console | https://ansim-ecru.vercel.app |
+| Backend API | https://ansim-backend-production.up.railway.app (requires the backend key) |
+| Telegram alerts | [@ansimbot](https://t.me/ansimbot) |
+| Contracts on Nile | [AnsimVault](https://nile.tronscan.org/#/contract/TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k) · [AnsimRegistry](https://nile.tronscan.org/#/contract/TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq) |
+
+Built at GWDC 2026 Korea for **TRON Challenge C** (a GasFree stablecoin batch payment and reconciliation assistant) and the **FuriosaAI × Bricksum Agent Finance track, Challenge B** (the controls and records for an AI agent that spends). The partner write-ups are in [docs/TRON.md](docs/TRON.md) and [docs/FURIOSAAI-BRICKSUM.md](docs/FURIOSAAI-BRICKSUM.md).
+
+## The Problem
+
+About 1.1 million foreign workers in Korea send money home every month. The Korea to Vietnam route averages **5.15%** in fees. USDT on TRON is cheaper and is what many of their families already use, but a wallet needs TRX before it can move USDT.
+
+The same rail is how voice-phishing money leaves Korea. The National Police Agency counted **₩1.26 trillion** in voice-phishing losses in 2025. From **1 October 2026**, crypto exchanges share the duty to refund those losses. Scammers use three moves again and again:
+
+- **Pressure:** "send it to this new account now".
+- **Address poisoning:** a wallet that looks like the family's, with the same first and last characters.
+- **Money mules:** many unrelated senders paying one fresh wallet.
+
+Putting an AI agent in charge of payouts makes this worse unless something stops it. A payment on chain shows who paid whom. It does not show who authorised the payment, or under what conditions. An agent that stays inside a budget only does so because someone built it to.
 
 **Who uses Ansim:** the operations team at a licensed remittance company that pays a daily batch of transfers to workers' families in Vietnam, the Philippines and Nepal.
 
-## What it does
+## The Solution
 
-1. **The operator keeps a contact book** of the families' wallets. Ansim refuses to save a wallet that is invalid, looks like an existing contact's wallet (address poisoning), is on the reported list or is frozen by Tether. It also reads the wallet's public history on TRON mainnet: a smart contract, USDT from Tether-frozen wallets, or five or more senders in a week (a money-mule pattern) marks the contact risky and holds its payments. A new contact can be paid only after a waiting period, 3 hours by default, like the delayed transfers (지연이체) Korean banks use against voice phishing. Every added or removed contact is written to the log.
-2. **The owner signs the payment limits** in TronLink: a budget that includes fees, a cap per payment, a cap per contact over 30 days, a deadline and the ticked contacts. It is TIP-712 typed data, and its hash is recorded in the AnsimRegistry contract on Nile.
-3. **The operator imports the day's CSV or Excel file, or asks the payout agent.** Korean headers such as 수취인 지갑주소 and 비고 are mapped automatically. Or the owner writes an instruction like "pay everyone their usual monthly support, skip anyone new or risky", and the model drafts the batch from the contacts with a reason per payment; code keeps only valid payments to real contacts.
-4. **Code screens every row** for invalid addresses and amounts, duplicates, payees not in the book, lookalike wallets (address poisoning), three or more senders paying one new wallet (a money-mule pattern), reported scam wallets, Tether's live freeze list, contacts still in their waiting period, and transfers at or above Korea's Travel Rule threshold (₩1,000,000) that lack the sender's details. The AI explains only the flagged rows, in Korean and English. The operator fixes, holds or confirms each one.
-5. **A pre-check** shows the GasFree payer account, supported token, balance, and total fees including the one-time activation fee. The batch page also compares the cost with a bank at 5.15%.
-6. **The owner approves the batch.** The operator prepares it; the owner who signed the limits signs the exact rows and total as TIP-712 typed data. Changing any row clears the approval, and every check runs again right before paying.
-7. **The vault releases the money.** The operator's USDT sits in the AnsimVault contract, not in a hot wallet. When the batch starts, the contract recomputes the owner's approval, recovers the signer on chain, and sends exactly the approved total plus 0.30 USDT per payment to the payer's GasFree account. Each approval works once, and the owner can freeze the vault.
-8. **The signer pays each approved row through GasFree**, but only if the policy allows it. Statuses update live on a map from Seoul to each family's country: waiting, processing, confirming, paid or failed. A refused row is logged with its reason.
-9. **Reconcile and prove.** The export links every result to its source row and note. Each family gets a receipt link in their language (Vietnamese, Tagalog or Nepali, plus Korean). The batch's closing log hash is sealed on chain, and one command lets anyone check the batch against the signed policy and the owner's approval.
-10. **Answer disputes.** The dispute desk finds a payment by name, note, wallet or transaction hash, shows its log events and what the chain says, and drafts a reply in Korean and English.
+Ansim puts the agent between two things it cannot change: the owner's signature and the chain.
 
-## What the AI does, and what stays in code
+- **The owner draws the line.** A budget that includes fees, a cap per payment, a cap per contact over 30 days, a deadline and the allowed contacts, signed as TIP-712 typed data in TronLink and recorded on chain.
+- **Code checks every payment.** 12 checks run before anything is paid, and again right before paying. They cover address poisoning, money mules, Tether's live freeze list, reported wallets, new contacts in their waiting period (like the 지연이체 delayed transfers Korean banks use), the Travel Rule threshold and more.
+- **The owner approves the exact batch.** One more TIP-712 signature over the exact rows and total. Changing any row clears it.
+- **A vault releases only what was approved.** The operator's USDT sits in the AnsimVault contract. The contract recovers the owner's signature on chain and releases exactly the approved total plus GasFree's fee, once per approval. The owner can freeze it from TronLink.
+- **GasFree pays without TRX.** Families receive the full amount and never need TRX. A lost response never causes a second payment.
+- **Everything is on the record.** A hash-chained log, the batch sealed on chain, receipts for the families in their language, a dispute desk, and one command that lets anyone rebuild the answer from the records alone.
 
-| Kiln with gpt-oss-120b | Plain code |
-|---|---|
-| Maps an unfamiliar spreadsheet layout to the payout fields | Every screening check |
-| Explains flagged rows in Korean and English and suggests fix, hold or pay | The policy gate: budget, cap, payees, deadline, stop |
-| Writes the owner's receipt for a finished batch | Signing, submitting, polling and recovery |
-| Answers an auditor's questions from the records, citing event numbers | The hash-chained log, the registry records and the verify script |
-| Drafts the reply to a customer's "did it arrive?" question from the log and the chain | Waiting periods, Travel Rule holds, owner approval and the family receipts |
-| Drafts a batch from the owner's instruction, with a reason per payment | Which proposed rows are valid payments to real contacts |
-| Explains a new contact's wallet risk flags | The wallet history lookup and the risk flags themselves |
+> The agent pays. The owner draws the line. Ansim does not make the agent trustworthy; it makes it answerable.
 
-A wrong model answer cannot move money. The model never holds a key.
+## Architecture
 
-## The boundary, and where it is enforced
-
-The agent must never pay outside the signed policy: over the budget once fees are added, above the per-payment cap, over a contact's 30-day cap, to a payee not on the list, after the deadline, or after the owner presses Stop. It must also never pay a batch the owner has not approved.
-
-- **In the signer.** [`refuseReason`](backend/src/policy.ts) runs before every signature, in [`payRow`](backend/src/orchestrator.ts). It counts everything already paid plus the value and fee cap of payments still in flight. A refusal is recorded in the log, never silent.
-- **In the vault contract.** [`AnsimVault`](contracts/src/AnsimVault.sol) holds the money. It releases a batch only if the owner's TIP-712 approval recovers to the owner on chain, only once per approval, only to the payer's GasFree account, and never more than the approved total plus the fee per payment. A compromised backend or a leaked payer key can reach at most one batch the owner signed.
-- **Inside every permit.** Each GasFree permit carries its own `maxFee` and `deadline`, capped at the policy deadline, and GasFree's controller contract enforces both on chain.
-- **Rows that can never be paid.** Invalid, reported and Tether-frozen wallets stay blocked even if the operator tries to confirm them. So do contacts still in their waiting period and Travel Rule transfers without the sender's details, until that changes.
-- **Before the batch starts.** The owner's signed approval must match the rows marked to pay under the active policy. [`verify.mjs`](backend/scripts/verify.mjs) checks that signature and that the paid rows are exactly the approved ones.
-
-Payments cannot happen twice. Each row is bound to one nonce and one signed permit, saved before any network call. If a response is lost, Ansim resends the same signed permit, which can execute at most once. It signs a new permit only when GasFree has rejected the old one, or after the old one's deadline has passed with its nonce unused. GasFree allows one pending transfer per account, so rows are paid one after another.
-
-Every submission carries Ansim's own request ID, which is stored next to GasFree's trace ID and the transaction hash in the log and the export.
-
-## Repository
-
-| Folder | What is in it |
-|---|---|
-| [`frontend/`](frontend) | Next.js operator console: policy signing, import, review, payment status, audit, metrics |
-| [`backend/`](backend) | Hono API: GasFree client, policy gate, screening, orchestrator, Kiln agent, event log |
-| [`backend/scripts/`](backend/scripts) | `setup.mjs` wallets and demo data, `verify.mjs` independent auditor, `fake-services.mjs` local GasFree and Kiln stand-ins for testing |
-| [`contracts/`](contracts) | `AnsimVault.sol`: holds the USDT and releases owner-approved batches. `AnsimRegistry.sol`: policy grants, stops and batch seals; it never holds money |
-
-## Run it
-
-```bash
-npm install
-npm run setup              # Nile test wallets in backend/.env.local, demo data in backend/data
+```
+ BROWSER                           VERCEL                       RAILWAY
+┌───────────────────────────┐    ┌────────────────────┐ key  ┌──────────────────────────────────┐
+│ Operator console           │───▶│ Next.js console     │─────▶│ Hono API  (backend/)              │
+│  contacts · limits · batch │    │ proxy.ts            │      │  12 checks · policy gate          │
+│  vault · map · disputes    │    │  site password      │      │  orchestrator · recovery          │
+│ TronLink: owner signs      │    │  adds backend key   │      │  hash-chained log (SQLite volume) │
+│ Family receipt /r/<token>  │    │  lets receipts pass │      │  AI flows · Telegram · verify.mjs │
+└───────────────────────────┘    └────────────────────┘      └───┬─────────┬─────────┬─────────┬─┘
+                                                                  │         │         │         │
+ TRON NILE (chain 3448148188)                                     │         │         │         │
+┌──────────────────────────────────────────────────┐              │         │         │         │
+│ AnsimVault      holds the USDT                    │◀─ release ──┘         │         │         │
+│   checks the owner's TIP-712 approval on chain    │   (notary key)        │         │         │
+│   sends approved total + fees ───┐                │                       │         │         │
+│                                  ▼                │                       │         │         │
+│ Payer's GasFree account ── GasFree controller ────│◀─ PermitTransfer ─────┘         │         │
+│   USDT to each family, no TRX needed              │   (GasFree API)                 │         │
+│ AnsimRegistry   policy hashes · batch seals       │◀─ records (notary key) ─────────┘         │
+└──────────────────────────────────────────────────┘                                            │
+ TRON MAINNET (read only): Tether freeze list · wallet history          ◀───────────────────────┤
+ AI: FuriosaAI Kiln or any OpenAI-compatible API, gpt-oss               ◀───────────────────────┤
+ Telegram @ansimbot: owner alerts · family arrival messages             ◀───────────────────────┘
 ```
 
-Then fill in `backend/.env.local`:
+### Chain Details
 
-- `GASFREE_API_KEY` and `GASFREE_API_SECRET` from [developer.gasfree.io](https://developer.gasfree.io/)
-- `KILN_BASE_URL` and `KILN_API_KEY` from the FuriosaAI developer kit
-- Send Nile TRX from the [Nile faucet](https://nileex.io/join/getJoinPage) to the notary address that setup printed
-
-```bash
-npm run deploy:contracts   # deploys AnsimRegistry to Nile
-npm run deploy:vault       # deploys AnsimVault; its owner is VAULT_OWNER if set, otherwise the demo owner key
-npm run dev                # backend on :4000, console on http://localhost:3000
-```
-
-Open the console, press **Pre-check**, and send Nile test USDT to the GasFree address it shows. GasFree's Nile fees are 0.30 USDT per transfer plus 1.00 USDT once to activate the account, so about 50 test USDT covers all four demo runs. Import `backend/data/demo/ansim-demo-payouts.xlsx` to try the full flow.
-
-```bash
-npm run check                               # unit tests for the policy gate, screening, parsing and log
-npm run verify -- path/to/ansim-evidence.json   # independent audit of an exported batch
-npm run reset                               # clear the local database before a clean demo
-```
-
-## Public deployment
-
-The console runs on Vercel and the backend runs on Railway. The backend holds the payer key and the event log, so two locks protect it:
-
-- **Backend key.** With `BACKEND_KEY` set, the backend refuses every request without it except `/api/health`. The console's proxy adds the key.
-- **Site password.** With `SITE_PASSWORD` set on Vercel, the browser asks for it before showing anything.
-
-**Backend on Railway.** Project `ansim`, service `ansim-backend`, live at `https://ansim-backend-production.up.railway.app`.
-
-- It builds from `backend/Dockerfile`, selected by the service variable `RAILWAY_DOCKERFILE_PATH=backend/Dockerfile`.
-- The database lives on a volume mounted at `/data`, set by `ANSIM_DB=/data/ansim-live.db`.
-- The service has the same variables as `backend/.env.local`, including `BACKEND_KEY`.
-- The service is not connected to GitHub, so redeploy from the repository root after backend changes:
-
-  ```bash
-  railway up --detach -s ansim-backend
-  ```
-
-**Console on Vercel.** Set the root directory to `frontend`, add these variables, then redeploy:
-
-| Variable | Value |
-|---|---|
-| `BACKEND_URL` | `https://ansim-backend-production.up.railway.app` |
-| `BACKEND_KEY` | the same value as in `backend/.env.local` |
-| `SITE_PASSWORD` | a password to give the judges |
-
-**Custom domain.** Names under `qd.je` can't be verified on Vercel, because Vercel asks for a record in DigitalPlat's parent zone. Add a free `vercel.app` name under Domains instead.
-
-## Live on Nile
-
-| What | Link |
-|---|---|
-| AnsimRegistry contract | [TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq](https://nile.tronscan.org/#/contract/TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq) |
-| First real test: policy recorded | [0565f2e9…1a177](https://nile.tronscan.org/#/transaction/0565f2e9302745773357709e132a5a75c466ccfa5f94dcf6308994e450c1a177) |
-| First real test: GasFree payment, 0.50 USDT plus 1.30 fee | [e30fe082…ed258](https://nile.tronscan.org/#/transaction/e30fe0822003ab98bffacaf0dc7c3e71e382ee95bcbe85d15a054aecf0fed258) |
-| First real test: batch sealed | [8a1e696f…9fc29](https://nile.tronscan.org/#/transaction/8a1e696fe0544cb008a2220a015d5b37532f605655a15c46592b4c5d9174fc29) |
-
-In that test, a second row to a payee left off the policy was refused and recorded, and `verify.mjs` passed all 11 checks against the chain.
-
-**Vault test, 30 September 2026.** The operator's idle USDT moved into the vault, the owner approved two payments, the vault checked the signature on chain and released exactly the approved total plus fees, both families were paid, and `verify.mjs` passed all 18 checks. With the vault frozen, the next batch was refused.
-
-| What | Link |
-|---|---|
-| AnsimVault contract | [TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k](https://nile.tronscan.org/#/contract/TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k) |
-| 997.90 USDT moved from the GasFree account into the vault | [e0e3cf0a…ece43](https://nile.tronscan.org/#/transaction/e0e3cf0acfa2d8d41530601dc837d0d0d48f54938ccd60a815e95f7f4d4ece43) |
-| Vault release for an approved batch: 1.00 + 2 × 0.30 | [77883b21…acd10](https://nile.tronscan.org/#/transaction/77883b217d9f03d809fc4d8bf5e0864ef6b5701c55825d3d3b6e22ce407acd10) |
-| Payment to an earlier demo wallet, 0.50 USDT | [86707aac…de3f9](https://nile.tronscan.org/#/transaction/86707aac066fb47e14fa1df5c3862ba1081dbba2b48cb2c249f279a2dcdde3f9) |
-| Payment to a second earlier demo wallet, 0.50 USDT | [cab75dcc…c2a1](https://nile.tronscan.org/#/transaction/cab75dccb8e1e2963ee6a2935e784566bf5d67c7a62ab055bb1755a0fa8ac2a1) |
-| Batch sealed in the registry | [1586d821…b7278](https://nile.tronscan.org/#/transaction/1586d821730cd872a490adafd2e6cbf8260ded48130b53849a16cab32d2b7278) |
-| Owner froze the vault | [29fea4c8…ff35f8](https://nile.tronscan.org/#/transaction/29fea4c879f0a64959e8251367cf009ae11fdf34df5126dab7317e22e8ff35f8) |
-
-## Demo runs
-
-The demo contacts are real Nile wallets named Dummy 1 to Dummy 6; `npm run setup -- --force-data` creates them and saves their private keys in `backend/data/demo-wallets.local.json`, which git ignores, so any of them can be opened in TronLink to watch payments arrive. The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추석 보너스), and 8 that must not be paid. Those are a duplicate, a lookalike of a known payee's wallet, an invalid address, three senders paying one new wallet, a Tether-frozen wallet and a reported wallet.
-
-| Run | Condition | Expected outcome | Transaction | Log event |
+| Chain | Role | Chain ID | RPC | Explorer |
 |---|---|---|---|---|
-| 1 | Budget 30 USDT, all payees | 5 paid, 8 held; a dropped response on line 3 recovers without a second payment | _fill in_ | _fill in_ |
-| 2 | Budget cut to 8 USDT | Lines 4 and 14 refused, over budget once fees are added | _fill in_ | _fill in_ |
-| 3 | Dummy 3 removed from the payee list | Line 4 refused, payee not allowed | _fill in_ | _fill in_ |
-| 4 | Owner presses Stop mid-batch | Remaining rows refused, stopped by the owner | _fill in_ | _fill in_ |
+| TRON Nile testnet | Payments, vault, registry | 3448148188 (`0xcd8690dc`) | https://nile.trongrid.io | [nile.tronscan.org](https://nile.tronscan.org) |
+| TRON mainnet | Read only: Tether's freeze list and wallet history | 728126428 (`0x2b6653dc`) | https://api.trongrid.io | [tronscan.org](https://tronscan.org) |
 
-## Alerts
+### Key Addresses
 
-Ansim's Telegram bot (`@ansimbot` in the demo) messages two kinds of people:
+| Contract | Chain | Address |
+|---|---|---|
+| USDT (test token) | Nile | `TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf` |
+| GasFree controller | Nile | `THQGuFzL87ZqhxkgqYEryRAd7gqFqL5rdc` |
+| GasFree service provider | Nile | `TKtWbdzEq5ss9vTS9kwRhBp5mXmBfBns3E` |
+| Tether USDT (freeze list) | Mainnet | `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` |
 
-- **Owners and operators** get every refusal, failure, Stop, new contact, approval, vault release, family confirmation and finished batch. **Connect my Telegram** in the console opens the bot with a one-time code that expires in 10 minutes; pressing Start subscribes that chat. Finding the bot alone subscribes no one.
-- **Families** open the Telegram link on their receipt page. The bot then tells them in their language whenever money reaches their wallet, with the receipt link. `/stop` ends it.
+### Deployed Contracts (29 Sep 2026)
 
-Set `TELEGRAM_BOT_TOKEN`, and `PUBLIC_API_URL` so the backend registers Telegram's webhook at startup. Telegram proves each webhook call with a secret header derived from the bot token, since it cannot send the backend key.
+| Contract | Address | Deployment |
+|---|---|---|
+| AnsimRegistry | [`TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq`](https://nile.tronscan.org/#/contract/TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq) | [3a13f341…91f82](https://nile.tronscan.org/#/transaction/3a13f341aa5e788e419e207b5ef02dd5ea906fc6b82cdc1f4745a67734d91f82) |
+| AnsimVault | [`TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k`](https://nile.tronscan.org/#/contract/TWWL6N7DyNzbJ9zZLXncVtcDdu5hDdmL8k) | [9aa5af24…d6613](https://nile.tronscan.org/#/transaction/9aa5af2446a900f5cc491b2c23689a00fecf419b9aaadf61790a32ea82dd6613) |
 
-## Tokens and energy
+### Accounts
 
-Every Kiln call is logged under its flow, and the **Tokens & energy** page reports calls, prompt and output tokens, and latency per flow.
+| Role | Address | Holds |
+|---|---|---|
+| Vault owner (the team's TronLink) | `TULPNbKuhamDY1FuW3KfHiUzRVzcuFio83` | Signs limits and approvals; can freeze the vault |
+| Payer | `TYXG72emQhVmcYYPXDbJfeSh5e53e5f8kn` | Signs GasFree permits; holds nothing |
+| Payer's GasFree account | `TW6BntBhCJbEZAQy88wU3tJEwcPL6N8qwX` | Only what the vault released for the current batch |
+| Notary and vault agent | `TVHXjWjM9MhMX9STBL16BprC1PSmoGXvNL` | Nile TRX for registry and vault calls |
 
-The energy estimate is an upper bound from FuriosaAI's published figures for gpt-oss-120b on two RNGD cards: 5.8 ms per output token, with each card well under 180 W.
+### On-Chain Evidence
+
+A complete live batch from the public console on 30 September 2026. The owner signed the limits and the approval in TronLink; the agent drafted the batch.
+
+| Step | Transaction |
+|---|---|
+| Payment limits (policy #7) recorded in AnsimRegistry | [172817d3…3accb4](https://nile.tronscan.org/#/transaction/172817d313c56a681fd4878ebfae1dd13649c55c754587d8e982c9946f3accb4) |
+| AnsimVault checked the owner's approval and released 2.50 + 0.30 USDT | [7aa70e5c…64b25](https://nile.tronscan.org/#/transaction/7aa70e5c8316d50823f2e873f50aa0f925c00910afa7c1fcadfd103830464b25) |
+| GasFree payment of 2.50 USDT to Dummy 2 in Hanoi | [f2fbcd70…68f05](https://nile.tronscan.org/#/transaction/f2fbcd7018e913960b09a9de1e008150137a02a6d9fd62627a9f4b365c768f05) |
+| Batch closing hash sealed in AnsimRegistry | [d4ee79c3…335d1fc](https://nile.tronscan.org/#/transaction/d4ee79c39c67abafb5807c76b1551b8be76c47ed14ce4cceee308dfe7335d1fc) |
+
+`verify.mjs` passes all 16 checks for that batch against the chain. Earlier tests on Nile:
+
+| Test | Transaction |
+|---|---|
+| 997.90 USDT moved from the GasFree account into the vault | [e0e3cf0a…ece43](https://nile.tronscan.org/#/transaction/e0e3cf0acfa2d8d41530601dc837d0d0d48f54938ccd60a815e95f7f4d4ece43) |
+| Vault release for an approved two-payment batch | [77883b21…acd10](https://nile.tronscan.org/#/transaction/77883b217d9f03d809fc4d8bf5e0864ef6b5701c55825d3d3b6e22ce407acd10) |
+| Owner froze the vault; the next batch was refused | [29fea4c8…ff35f8](https://nile.tronscan.org/#/transaction/29fea4c879f0a64959e8251367cf009ae11fdf34df5126dab7317e22e8ff35f8) |
+| Vault handed to the owner's TronLink with `setOwner` | [6866a972…e28bdd](https://nile.tronscan.org/#/transaction/6866a9726a9e0b9033f897bfe68d6b0fa2bf7c4c2d43de253e3789839fe28bdd) |
+| First real payment, 0.50 USDT plus 1.30 fee (activation) | [e30fe082…ed258](https://nile.tronscan.org/#/transaction/e30fe0822003ab98bffacaf0dc7c3e71e382ee95bcbe85d15a054aecf0fed258) |
+
+## How It Works
+
+### Phase 1: The operator keeps the contacts
+
+Each family's wallet is a contact with a name, country, city and usual amount. Ansim refuses to save a wallet that is:
+
+- invalid,
+- already saved,
+- a lookalike of an existing contact's wallet,
+- on the reported list,
+- or frozen by Tether.
+
+Then it reads the wallet's public history on TRON mainnet and flags anything suspicious. A new contact can be paid only after a waiting period (3 hours by default; 3 minutes in the demo). Adding, removing or changing a contact is written to the log and sent to the owner on Telegram.
+
+### Phase 2: The owner signs the payment limits
+
+In TronLink, the owner signs a `SpendingPolicy`:
+
+- payer,
+- budget, fees included,
+- cap per payment,
+- cap per contact over 30 days,
+- hash of the allowed contacts,
+- deadline,
+- nonce.
+
+Ansim checks the signature, and the notary key records the policy's hash in AnsimRegistry. A new policy replaces the old one. **Stop all payments** stops it at once.
+
+### Phase 3: A batch is drafted
+
+There are two ways in:
+
+- **A file.** The operator imports the day's CSV or Excel file. Korean headers such as 수취인 지갑주소 and 비고 are mapped automatically.
+- **The payout agent.** The owner types an instruction, for example "pay everyone their usual monthly support, skip anyone new or risky". The model proposes payments to contacts only, with a reason for each. Code keeps only valid payments to real contacts.
+
+### Phase 4: Code screens every row
+
+The 12 checks below run on every row. Blocking flags can never be paid; holding flags wait for the operator. The AI explains the flagged rows in Korean and English, and never sees the clean ones.
+
+### Phase 5: The owner approves the exact batch
+
+The owner signs a `BatchApproval` in TronLink: batch, policy, a hash of the exact rows, the count and the total. Editing any row clears it. Pressing **Pay** runs every check again (the freeze list is live), then confirms the approval still matches the rows and the active policy.
+
+### Phase 6: The vault releases the money
 
 ```
-2 cards × 180 W × 0.0058 s ≈ 2.1 J per output token
+Ansim (notary key) → AnsimVault.release(batchId, policyId, rowsHash, count, total, ownerSignature)
+  → recompute the TIP-712 digest, ecrecover the signer
+  → signer must be the vault's owner; the approval must be unused; the vault must not be frozen
+  → send total + count × 0.30 USDT to the payer's GasFree account, and nothing anywhere else
 ```
 
-Prompt tokens are processed in parallel and left out of the estimate.
+### Phase 7: GasFree pays each row
 
-How the design avoids inference:
+For each row, the payer signs one TIP-712 `PermitTransfer`, with its own fee cap and a deadline no later than the policy's. The policy gate runs before each signature. GasFree's controller moves the USDT and pays the network cost, so the family receives the full amount and never needs TRX. Each row goes waiting → processing → confirming → paid, live on the map. GasFree allows one pending transfer per account, so rows go one after another.
 
-- Clean rows never reach the model. Code runs every check first.
-- One call explains all flagged rows in a batch.
-- A spreadsheet layout mapped once is cached, so the next import costs no tokens.
-- Replies are short JSON with a token cap and low reasoning effort.
-- Refusals cost nothing, because the policy gate is code.
+### Phase 8: Reconcile, prove, tell the family
 
-## Challenge criteria
+When the last row settles, the batch's closing log hash is sealed in AnsimRegistry. Then:
 
-**TRON Challenge C**
+- **The owner** gets a Telegram alert and an AI-written receipt.
+- **The export** links every result to its source row, receipt, transaction and fee.
+- **Each family** has a receipt page in Vietnamese, Tagalog or Nepali, with Korean and English. There they can confirm receipt, share their city if they want, and subscribe on Telegram.
+- **Anyone** can run `verify.mjs` on the evidence file to rebuild the answer from the chain.
 
-| Criterion | Where to see it |
+### Phase 9: Disputes
+
+"My family didn't get the money." The dispute desk finds the payment by name, note, wallet or transaction hash. It shows the log events and what the chain says, and drafts a reply in Korean and English that cites the event numbers.
+
+## The 12 Checks: Deep Dive
+
+| Check | Flag | Effect | What it catches |
+|---|---|---|---|
+| Invalid address | `INVALID_ADDRESS` | Blocks | Typos and malformed wallets (checksum included) |
+| Invalid amount | `INVALID_AMOUNT` | Blocks | Missing, zero or non-numeric amounts |
+| Duplicate | `DUPLICATE` | Holds | Same sender, wallet, amount and note twice |
+| New payee | `NEW_PAYEE` | Holds | A wallet that is not a contact |
+| Lookalike wallet | `LOOKALIKE` | Holds | Same first and last four characters as a contact's wallet but different (address poisoning) |
+| Unusual amount | `UNUSUAL_AMOUNT` | Holds | More than 3 times the contact's usual amount |
+| Reported scam wallet | `REPORTED_WALLET` | Blocks | Wallets on the reported list |
+| Frozen by Tether | `TETHER_FROZEN` | Blocks | Wallets on Tether's live mainnet freeze list |
+| Many senders, one wallet | `MANY_SENDERS_ONE_WALLET` | Holds | Three or more senders paying one new wallet (a mule pattern) |
+| New contact waiting | `NEW_CONTACT_WAIT` | Blocks | A contact still inside its waiting period |
+| Travel Rule details needed | `TRAVEL_RULE_INFO` | Blocks | ₩1,000,000 or more without the sender's details |
+| Risky wallet | `RISKY_WALLET` | Holds | A contact whose mainnet history shows a contract, frozen senders or 5+ senders in a week |
+
+The address-poisoning demo is real. Setup runs a birthday search over consecutive keypairs until it finds two real wallets that share their first and last four characters.
+
+## The Policy Gate: Deep Dive
+
+[`refuseReason`](backend/src/policy.ts) runs before every signature. It checks, in this order:
+
+| # | Check | Refusal |
+|---|---|---|
+| 1 | The owner has not pressed Stop | `STOPPED_BY_OWNER` |
+| 2 | A signed policy is active | `NO_ACTIVE_POLICY` |
+| 3 | The deadline has not passed | `DEADLINE_PASSED` |
+| 4 | The payee is on the signed list | `PAYEE_NOT_ALLOWED` |
+| 5 | The amount is within the cap per payment | `OVER_PER_PAYMENT_CAP` |
+| 6 | The contact stays under its 30-day cap, counting all policies | `OVER_MONTHLY_PAYEE_CAP` |
+| 7 | Paid, in flight and fees stay inside the budget | `OVER_BUDGET_WITH_FEES` |
+
+The budget counts payments still in flight at their fee cap, so a slow confirmation can never let the agent overspend. Every refusal is written to the log with its reason, and costs no AI tokens.
+
+## The Vault: Deep Dive
+
+| Function | Who | What |
+|---|---|---|
+| `release(batchId, policyId, rowsHash, count, total, sig)` | Agent (notary key) | Recovers the approval's signer. The signer must be the owner, the approval unused and the vault not frozen. Sends the approved total plus the fee per payment to the payer's GasFree account |
+| `setFrozen(bool)` | Owner | Emergency brake: no release while frozen |
+| `withdraw(to, amount)` | Owner | The owner can always take the money out |
+| `setOwner(address)` | Owner | Hands the vault to another owner |
+| `approvalDigest(…)`, `approver(…)`, `released(digest)` | Anyone | Read the digest, the signer and what was released |
+
+What a compromised Ansim backend could do:
+
+| With the vault | Without it |
 |---|---|
-| Import & Validation | Batch page: CSV or Excel import, 9 row checks, inline fixes, totals |
-| Balance & Fee Pre-Check | Pre-check panel: GasFree account, token, balance, transfer and activation fees |
-| Authorization & Orchestration | Owner-signed policy and batch approval; AnsimVault releases only the approved batch; then one TIP-712 permit per row, submitted in order |
-| Per-Transaction Status & Recovery | Live status per row with request ID and hash; the dropped-response demo on line 3 |
-| Reconciliation & Export | CSV export linked to source rows and notes; paid, refused, failed and held counts |
+| At most one batch the owner signed, once, and only to the payer's GasFree account | Everything in the hot wallet |
 
-**FuriosaAI × Bricksum Challenge B**
+## Payments Cannot Happen Twice
 
-| Criterion | Where to see it |
+Each row is bound to one nonce and one signed permit, saved before any network call. If a response is lost:
+
+1. **Ask first.** With a request ID, ask GasFree for the transfer's status.
+2. **Resend the same permit** while it is inside its deadline. Its nonce works only once, so GasFree either returns the existing transfer or rejects the copy.
+3. **Look on chain.** If the account's nonce moved past the permit's, the permit was used: find the transfer on chain.
+4. **Sign again only when it's safe.** A new permit is signed only if the old one's deadline passed with its nonce unused.
+
+The demo drops the response for one line on purpose (`SIMULATE_LOST_RESPONSE_LINE`) and shows the recovery.
+
+## Evidence: Deep Dive
+
+Every action is an event in an append-only log: `hash = sha256(previous hash + event)`. Editing any past event breaks every hash after it. The export (`ansim-evidence-2`) contains the policies with their signatures, the rows, the owner's approval, the rules and every event.
+
+[`verify.mjs`](backend/scripts/verify.mjs) re-implements every rule instead of importing Ansim's code. It uses only that file and public TRON data, and checks:
+
+- the hash chain;
+- each policy's signature, payee hash, log entry and registry record;
+- the batch seal in the registry;
+- that the owner signed the approval before the first payment, and that the paid rows are exactly the approved ones;
+- that the vault's on-chain release matches, stayed within the approved total plus fees, and happened first;
+- for every paid row: the signed record, the chain transfer, the policy limits including the 30-day cap and the fee cap, the waiting period and the Travel Rule details;
+- that every refusal was required.
+
+**Verify a tampered copy** raises one paid amount by 1 USDT, and the check fails.
+
+## Multi Layer Protection
+
+| Layer | Where | When |
+|---|---|---|
+| 1. Contact checks | Backend | When a contact is added: invalid, duplicate, lookalike, reported, frozen, wallet history |
+| 2. Row screening | Backend | At import, on every edit, and again right before paying |
+| 3. Policy gate | Signer | Before every single signature |
+| 4. Owner approval | TIP-712, TronLink | Before a batch can start |
+| 5. AnsimVault | Contract on Nile | Before any money leaves the vault |
+| 6. GasFree permit | GasFree controller on Nile | Each permit's own fee cap and deadline |
+| 7. Independent verify | Anyone, afterwards | From the records and the chain alone |
+
+### Defense Matrix
+
+| Attack | Stopped by |
 |---|---|
-| Declared Function & User Need | First line of this README; the table of AI tasks and code; the payout agent drafts a batch from the owner's words |
-| Boundaries & Stopping | Runs 2, 3 and 4; the 30-day cap per contact; refusals recorded with reasons in the log |
-| Kiln API Integration & Efficiency | Four Kiln flows on gpt-oss-120b; the Tokens & energy page |
-| Blockchain Integration | GasFree USDT payments on Nile; AnsimVault checks the owner's signature on chain before releasing money; policy and batch records in AnsimRegistry |
-| Approval & Evidence | Owner signs the limits and approves each batch, watches, stops, gets Telegram alerts and a receipt; `verify.mjs` rebuilds the answer from the export and the chain; the dispute desk answers customers from the same records |
+| Paying a reported or Tether-frozen wallet | Contact check · screening blocks (live freeze list, rechecked before paying) |
+| Address poisoning (lookalike wallet) | Contact check refuses to save it · screening holds it |
+| Money mule collecting from many senders | Screening holds it · wallet history marks the contact risky |
+| Insider adds their own wallet and pays it the same day | Waiting period · owner's Telegram alert · owner approval |
+| Agent pays more than the budget, fees included | Policy gate · vault releases only the approved total |
+| Agent pays a wallet not on the signed list | Policy gate · verify |
+| Payment after the deadline or after Stop | Policy gate · permit deadline capped at the policy's |
+| Operator edits rows after approval | Approval cleared · vault checks the rows hash |
+| Hacked backend drains the funds | Vault: needs the owner's signature, once per approval |
+| Leaked payer key | The GasFree account holds only the current batch's release |
+| Lost response causes a second payment | Nonce-bound permits and recovery |
+| Records edited afterwards | Hash chain · registry seal · verify |
 
-## Honest notes
+## What Ansim Does NOT Protect Against
 
-- All code in this repository was written during the hackathon, on 29 and 30 September 2026. The frontend started from `create-next-app`.
-- The reported-wallet list is a stand-in for wallets reported to police and exchanges.
-- The live vault's owner is the team's TronLink account (TULPNb…io83), handed over with `setOwner` on 30 September ([transaction](https://nile.tronscan.org/#/transaction/6866a9726a9e0b9033f897bfe68d6b0fa2bf7c4c2d43de253e3789839fe28bdd)). Payment limits, batch approvals and freezing are signed in TronLink; approvals signed with the demo owner key no longer unlock it. `VAULT_OWNER=<address> npm run deploy:vault` deploys a vault with any owner. The vault test above ran from a scratch database, so its batches are not in the live console.
-- The wallet history check reads TRON mainnet even in the Nile demo, because that is where real families' wallets have a history. The demo wallets have none, so they show as never used.
-- `fake-services.mjs` exists only to test the payment and AI logic without keys. Its transaction hashes are made up, and `verify.mjs` correctly fails them against the chain. Its AI replies are marked [fake].
-- The receipt translations were written without a native speaker's check. The KRW rate for the Travel Rule threshold is a setting (`KRW_PER_USDT`), not a live quote.
-- The AI works with any OpenAI-compatible API. With a provider other than Kiln, the energy estimate does not apply, and the Tokens & energy page says so.
-- Unlicensed crypto remittance is illegal in Korea. Ansim is built for licensed operators and adds the controls regulators ask for.
+| Scenario | Ansim's response |
+|---|---|
+| The owner is tricked into signing limits for a scammer | ⚠️ The wallet checks and waiting period still apply, but a signature is a signature |
+| A brand-new scam wallet with a clean history | ⚠️ Waiting period and holds slow it down; nothing can know it is a scam yet |
+| The owner's TronLink key is stolen | ❌ The thief is the owner. Keep the owner's wallet safe |
+| Fraud while collecting the won in Korea | ❌ Out of scope: the operator's KYC and banking controls |
+| GasFree or TRON outages | ⚠️ Payments pause and never double; press Recover later |
+
+## What the AI Does, and What Stays in Code
+
+| The model | Plain code |
+|---|---|
+| Maps an unfamiliar spreadsheet layout | Every check, and which flags block or hold |
+| Explains flagged rows in Korean and English | The policy gate: budget, caps, payees, deadline, stop |
+| Drafts a batch from the owner's instruction | Which proposed rows are valid payments to real contacts |
+| Explains a new contact's wallet-risk flags | The wallet-history lookup and the risk flags |
+| Writes the owner's receipt | Signing, submitting, polling and recovery |
+| Answers auditor questions, citing event numbers | The hash-chained log, registry records and verify |
+| Drafts replies to customer disputes | The vault, approvals and receipts |
+
+A wrong model answer cannot move money. The model never holds a key. Every call is logged by flow on the **Tokens & energy** page. See [docs/FURIOSAAI-BRICKSUM.md](docs/FURIOSAAI-BRICKSUM.md) for the Kiln integration, token budgets and the energy estimate.
+
+## Contracts
+
+| Contract | Purpose |
+|---|---|
+| [`AnsimVault.sol`](contracts/src/AnsimVault.sol) | Holds the operator's USDT and releases only owner-approved batches |
+| [`AnsimRegistry.sol`](contracts/src/AnsimRegistry.sol) | Records policy grants, stops and batch seals. It never holds money |
+
+Details, functions, events and the TIP-712 digest are in [contracts/README.md](contracts/README.md).
+
+## Project Structure
+
+```
+Ansim/
+├── frontend/                     Next.js 16 console on Vercel          → frontend/README.md
+│   ├── app/(console)/            payout desk, batch pages, disputes, tokens & energy
+│   ├── app/r/[token]/            the family's receipt page
+│   ├── app/flow-map.tsx          live payout map
+│   ├── app/wallet.tsx            Connect TronLink
+│   └── proxy.ts                  site password and backend key
+├── backend/                      Hono API on Railway                   → backend/README.md
+│   ├── src/                      checks, policy gate, orchestrator, vault, AI, Telegram, log
+│   ├── scripts/                  setup, verify, fake services, vault deploy
+│   ├── data/                     contacts, reported list, demo payout file
+│   └── Dockerfile
+├── contracts/                    Solidity for the TRON VM               → contracts/README.md
+│   ├── src/                      AnsimVault.sol, AnsimRegistry.sol
+│   └── deployments/              Nile addresses and ABIs
+├── docs/
+│   ├── TRON.md                   TRON Challenge C write-up
+│   └── FURIOSAAI-BRICKSUM.md     Agent Finance Challenge B write-up
+├── LICENSE
+└── README.md
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 22 or newer
+- [TronLink](https://www.tronlink.org/) on the Nile testnet, for the owner
+- A GasFree API key and secret for Nile from [developer.gasfree.io](https://developer.gasfree.io/)
+- Nile TRX from the [Nile faucet](https://nileex.io/join/getJoinPage) for the notary address
+- Optional: a Kiln key from the FuriosaAI developer kit, or any OpenAI-compatible key such as OpenRouter
+- Optional: a Telegram bot from @BotFather
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/minrawsjar/Ansim.git
+cd Ansim
+npm install
+```
+
+### 2. Wallets and demo data
+
+```bash
+npm run setup
+```
+
+This creates the payer, owner and notary keys in `backend/.env.local`, and the demo contacts (Dummy 1 to Dummy 6, real Nile wallets whose keys go to the git-ignored `backend/data/demo-wallets.local.json`). It also writes the reported list and the demo payout file.
+
+### 3. Environment
+
+Fill in `backend/.env.local` (see [backend/.env.example](backend/.env.example) and [backend/README.md](backend/README.md)): `GASFREE_API_KEY`, `GASFREE_API_SECRET`, and optionally `KILN_BASE_URL`, `KILN_API_KEY`, `KILN_MODEL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+
+### 4. Contracts
+
+```bash
+npm run deploy:contracts                 # AnsimRegistry
+VAULT_OWNER=<your TronLink address> npm run deploy:vault
+```
+
+Then send Nile test USDT to the vault, or to the payer's GasFree account shown in the pre-check and press **Move it into the vault**.
+
+### 5. Run
+
+```bash
+npm run dev          # backend on :4000, console on http://localhost:3000
+```
+
+### 6. Check
+
+```bash
+npm run check                                   # unit tests: policy gate, checks, approvals, CSV, wallet risk
+npm run verify -- path/to/ansim-evidence.json   # independent audit of an exported batch
+npm run reset                                   # clear the local database
+```
+
+## Demo
+
+Open https://ansim-ecru.vercel.app, press **Connect TronLink** and switch to Nile.
+
+1. **Contacts:** six real Nile wallets in Hanoi, Ho Chi Minh City, Cebu, Davao, Pokhara and Kathmandu. Each shows its mainnet wallet check.
+2. **Payment limits:** tick contacts, press **Change limits** and sign in TronLink.
+3. **Payout agent:** pick an example prompt, then **Draft a batch**. Or import [`backend/data/demo/ansim-demo-payouts.xlsx`](backend/data/demo/ansim-demo-payouts.xlsx), which has 13 rows: 4 clean, 1 unusual amount, and 8 that must not be paid (a duplicate, an address-poisoning lookalike, a typo, three rows from mule senders, a Tether-frozen wallet and a reported wallet).
+4. **Approve in TronLink, then Pay:** the vault releases the batch on chain, and the map shows each payment.
+5. **Prove it:** export the evidence, run verify, then verify a tampered copy.
+6. **The family's side:** open a row's **Family receipt**, press **I received it**, and share a city.
+
+### Boundary runs
+
+| Run | Condition | Expected outcome |
+|---|---|---|
+| 1 | "Send 20 USDT to every contact" with a 15 USDT cap per payment | Every row refused: `OVER_PER_PAYMENT_CAP` |
+| 2 | Budget smaller than the batch plus fees | Rows that do not fit refused: `OVER_BUDGET_WITH_FEES` |
+| 3 | A contact unticked from the signed limits | Refused: `PAYEE_NOT_ALLOWED` (recorded in the first real test) |
+| 4 | Owner presses Stop mid-batch | Remaining rows refused: `STOPPED_BY_OWNER` |
+| 5 | Owner freezes the vault | Release refused on chain (recorded above) |
+
+Every refusal appears in the batch's execution journal, in the evidence file and in Telegram.
+
+## Partners
+
+| Track | Write-up |
+|---|---|
+| TRON Challenge C: GasFree batch payments and reconciliation | [docs/TRON.md](docs/TRON.md) |
+| FuriosaAI × Bricksum Agent Finance, Challenge B: controls and records for an AI agent that spends | [docs/FURIOSAAI-BRICKSUM.md](docs/FURIOSAAI-BRICKSUM.md) |
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Console | Next.js 16, React 19, Tailwind CSS 4, TronLink |
+| Backend | Node.js 22, Hono, better-sqlite3, TronWeb 6, SheetJS, OpenAI SDK |
+| Contracts | Solidity 0.8.26 for the TRON VM (EVM target istanbul) |
+| Payments | GasFree on TRON Nile, TIP-712 permits |
+| AI | FuriosaAI Kiln or any OpenAI-compatible API, gpt-oss |
+| Alerts | Telegram Bot API with a webhook |
+| Hosting | Vercel (console), Railway with a volume (backend) |
+
+## Key Concepts
+
+- **GasFree:** a TRON service that pays a USDT transfer's network cost and takes a flat USDT fee instead, so neither the sender's signing key nor the family needs TRX.
+- **TIP-712:** TRON's version of EIP-712 typed-data signing. Ansim uses it three times: the owner's policy, the owner's batch approval, and each GasFree permit.
+- **지연이체 (delayed transfer):** a service Korean banks offer against voice phishing that holds a transfer for at least 3 hours. Ansim's waiting period for new contacts works the same way.
+- **Travel Rule:** Korea requires originator and beneficiary details for virtual-asset transfers of ₩1,000,000 or more. Ansim holds such rows until the details are added, keeping them off chain.
+- **Address poisoning:** scammers send tiny amounts from a wallet that shares the first and last characters of a real contact's wallet, hoping it gets copied from the history.
+
+## Honest Notes
+
+- All code in this repository was written during the hackathon, on 29 and 30 September 2026. The console started from `create-next-app`.
+- **AI provider.** The Kiln API key from the FuriosaAI developer kit did not arrive during the event, so the live AI runs on OpenRouter with `openai/gpt-oss-20b`. It uses the same OpenAI-compatible client, and switching to Kiln with `gpt-oss-120b` is three settings. The energy estimate describes Kiln's RNGD hardware, and the Tokens & energy page says when it does not apply.
+- **Vault owner.** The live vault's owner is the team's TronLink account, handed over with `setOwner`. Approvals signed with the demo owner key no longer unlock it.
+- **Demo data.** The reported-wallet list is a stand-in for wallets reported to police and exchanges. The demo contacts are real Nile wallets with no mainnet history.
+- **Translations and rates.** The receipt and Telegram translations have not been checked by native speakers. The KRW rate for the Travel Rule threshold is a setting (`KRW_PER_USDT`), not a live quote.
+- **Test-only services.** `fake-services.mjs` is only for testing without keys. Its transaction hashes are made up, and `verify.mjs` correctly fails them.
+- **Downtime.** Railway stops the backend for a minute or two on each deploy, because its volume cannot be attached twice. The console retries by itself.
+- **Legality.** Unlicensed crypto remittance is illegal in Korea. Ansim is built for licensed operators and adds the controls regulators ask for.
 
 ## Sources
 
@@ -221,3 +481,12 @@ How the design avoids inference:
 - [FuriosaAI: gpt-oss-120b on two RNGD cards](https://furiosa.ai/blog/serving-gpt-oss-120b-at-5-8-ms-tpot-with-two-rngd-cards-compiler-optimizations-in-practice)
 - [GasFree developer documentation](https://docs.gasfree.io/)
 - [TRON developer documentation](https://developers.tron.network/)
+- [TronLink: switching networks from a dApp](https://docs.tronlink.org/plugin-wallet/active-requests/)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+## Built with
+
+TRON • GasFree • TronLink • FuriosaAI Kiln • gpt-oss • Next.js • Hono • Telegram
