@@ -58,6 +58,7 @@ function Modebar({ s }: { s: Status }) {
         {s.simulateLostLine && <span className="text-warn">Demo: line {s.simulateLostLine} response dropped</span>}
         {s.telegram && <ConnectTelegram />}
         {s.telegram && s.telegramChats > 0 && <TestAlert />}
+        <Link href="/stage" className="text-celadon hover:underline">Live demo QR →</Link>
       </div>
     </section>
   );
