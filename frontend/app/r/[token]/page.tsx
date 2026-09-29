@@ -6,7 +6,7 @@ import { api, usdt, tronscanTx } from '../../lib';
 import { nearestCity } from '../../places';
 
 type Receipt = {
-  status: 'paid' | 'on_the_way' | 'not_sent'; sender: string | null; name: string | null; amount: number | null; note: string | null;
+  status: 'paid' | 'on_the_way' | 'scheduled' | 'not_sent'; sender: string | null; name: string | null; amount: number | null; note: string | null;
   wallet: string; country: string | null; txnHash: string | null; paidAt: number | null;
   ack: { at: number; city: string | null } | null;
   telegramBot: string | null;
@@ -15,6 +15,7 @@ type Words = {
   locale: string; heading: string; check: string; noFee: string;
   paid: (s: string, n: string, a: string, w: string, date: string, time: string) => string;
   onTheWay: (s: string, n: string, a: string) => string;
+  scheduled: (s: string, n: string, a: string) => string;
   notSent: string;
   confirm: string; shareCity: string; thanks: string; telegram: string;
 };
@@ -25,6 +26,7 @@ const LANG: Record<string, Words> = {
     locale: 'vi-VN', heading: 'Biên nhận chuyển tiền', check: 'Kiểm tra trên TRONSCAN', noFee: 'Số tiền nhận được không bị trừ phí.',
     paid: (s, n, a, w, date, time) => `${s} đã gửi ${a} USDT cho ${n}. Tiền đã vào ví có đuôi ${w} lúc ${time} ngày ${date}.`,
     onTheWay: (s, n, a) => `${s} đang gửi ${a} USDT cho ${n}. Tiền đang trên đường đến.`,
+    scheduled: (s, n, a) => `${s} đang chuẩn bị gửi ${a} USDT cho ${n}.`,
     notSent: 'Khoản tiền này chưa được gửi. Vui lòng liên hệ người gửi.',
     confirm: 'Tôi đã nhận được tiền', telegram: 'Nhận tin nhắn Telegram khi tiền đến', shareCity: 'Chia sẻ thành phố của tôi (không phải vị trí chính xác)', thanks: 'Cảm ơn. Người gửi sẽ thấy bạn đã nhận được tiền.',
   },
@@ -32,6 +34,7 @@ const LANG: Record<string, Words> = {
     locale: 'fil-PH', heading: 'Resibo ng padala', check: 'Tingnan sa TRONSCAN', noFee: 'Walang bayad na ibinawas sa halagang ito.',
     paid: (s, n, a, w, date, time) => `Nagpadala si ${s} ng ${a} USDT kay ${n}. Pumasok ito sa wallet na nagtatapos sa ${w} noong ${date}, ${time}.`,
     onTheWay: (s, n, a) => `Nagpapadala si ${s} ng ${a} USDT kay ${n}. Papunta na ito.`,
+    scheduled: (s, n, a) => `Naghahanda si ${s} na magpadala ng ${a} USDT kay ${n}.`,
     notSent: 'Hindi naipadala ang perang ito. Makipag-ugnayan sa nagpadala.',
     confirm: 'Natanggap ko na ang pera', telegram: 'Makatanggap ng mensahe sa Telegram kapag dumating ang pera', shareCity: 'Ibahagi ang aking lungsod (hindi ang eksaktong lokasyon)', thanks: 'Salamat. Makikita ng nagpadala na natanggap mo ito.',
   },
@@ -39,6 +42,7 @@ const LANG: Record<string, Words> = {
     locale: 'ne-NP', heading: 'रकम पठाएको रसिद', check: 'TRONSCAN मा हेर्नुहोस्', noFee: 'यो रकमबाट कुनै शुल्क काटिएको छैन।',
     paid: (s, n, a, w, date, time) => `${s} ले ${n} लाई ${a} USDT पठाउनुभयो। यो ${date} ${time} मा ${w} मा अन्त्य हुने वालेटमा आइपुग्यो।`,
     onTheWay: (s, n, a) => `${s} ले ${n} लाई ${a} USDT पठाउँदै हुनुहुन्छ। यो बाटोमा छ।`,
+    scheduled: (s, n, a) => `${s} ले ${n} लाई ${a} USDT पठाउने तयारी गर्दै हुनुहुन्छ।`,
     notSent: 'यो रकम पठाइएको छैन। कृपया पठाउने व्यक्तिलाई सम्पर्क गर्नुहोस्।',
     confirm: 'मैले रकम पाएँ', telegram: 'रकम आइपुग्दा Telegram मा सन्देश पाउनुहोस्', shareCity: 'मेरो सहर साझा गर्नुहोस् (ठ्याक्कै स्थान होइन)', thanks: 'धन्यवाद। पठाउने व्यक्तिले तपाईंले रकम पाउनुभएको देख्नुहुनेछ।',
   },
@@ -46,6 +50,7 @@ const LANG: Record<string, Words> = {
     locale: 'ko-KR', heading: '송금 영수증', check: 'TRONSCAN에서 확인하기', noFee: '받는 금액에서 수수료가 빠지지 않았습니다.',
     paid: (s, n, a, w, date, time) => `${s}님이 ${n}님께 ${a} USDT를 보냈습니다. ${date} ${time}에 끝자리 ${w} 지갑으로 입금되었습니다.`,
     onTheWay: (s, n, a) => `${s}님이 ${n}님께 ${a} USDT를 보내는 중입니다.`,
+    scheduled: (s, n, a) => `${s}님이 ${n}님께 ${a} USDT 송금을 준비하고 있습니다.`,
     notSent: '이 송금은 보내지지 않았습니다. 송금한 분께 문의해 주세요.',
     confirm: '받았습니다', telegram: '돈이 도착하면 텔레그램으로 알림 받기', shareCity: '내 도시 공유 (정확한 위치 아님)', thanks: '감사합니다. 송금한 분께 수령 확인이 전달됩니다.',
   },
@@ -53,6 +58,7 @@ const LANG: Record<string, Words> = {
     locale: 'en-GB', heading: 'Payment receipt', check: 'Check it on TRONSCAN', noFee: 'No fee was taken from this amount.',
     paid: (s, n, a, w, date, time) => `${s} sent ${a} USDT to ${n}. It arrived in the wallet ending ${w} on ${date} at ${time}.`,
     onTheWay: (s, n, a) => `${s} is sending ${a} USDT to ${n}. It is on its way.`,
+    scheduled: (s, n, a) => `${s} is preparing to send ${a} USDT to ${n}.`,
     notSent: 'This payment was not sent. Please contact the sender.',
     confirm: 'I received it', telegram: 'Get a Telegram message when money arrives', shareCity: 'Share my city (not my exact location)', thanks: 'Thank you. The sender will see that you received it.',
   },
@@ -66,7 +72,7 @@ function Block({ w, r, big }: { w: Words; r: Receipt; big?: boolean }) {
   const at = r.paidAt ?? 0;
   const date = new Intl.DateTimeFormat(w.locale, { dateStyle: 'long' }).format(at);
   const time = new Intl.DateTimeFormat(w.locale, { timeStyle: 'short' }).format(at);
-  const line = r.status === 'paid' ? w.paid(s, n, a, r.wallet.slice(-4), date, time) : r.status === 'on_the_way' ? w.onTheWay(s, n, a) : w.notSent;
+  const line = r.status === 'paid' ? w.paid(s, n, a, r.wallet.slice(-4), date, time) : r.status === 'on_the_way' ? w.onTheWay(s, n, a) : r.status === 'scheduled' ? w.scheduled(s, n, a) : w.notSent;
   return (
     <div lang={w.locale} className="grid gap-1.5">
       <div className="eyebrow">{w.heading}</div>
@@ -135,7 +141,7 @@ export default function FamilyReceipt() {
   }, [token]);
 
   const lang = BY_COUNTRY[(r?.country ?? '').toLowerCase()] ?? 'en';
-  const tone = r?.status === 'paid' ? 'text-celadon' : r?.status === 'not_sent' ? 'text-stop' : 'text-warn';
+  const tone = r?.status === 'paid' ? 'text-celadon' : r?.status === 'not_sent' ? 'text-stop' : r?.status === 'scheduled' ? 'text-muted' : 'text-warn';
   return (
     <main className="mx-auto grid min-h-screen max-w-md content-center gap-6 px-4 py-10">
       <div className="flex items-center gap-3">
@@ -147,7 +153,7 @@ export default function FamilyReceipt() {
       {r && (
         <section className="grid gap-6 rounded-xl border border-line bg-surface p-6">
           <div className="grid gap-1">
-            <span className={`font-mono text-[11px] tracking-[0.12em] uppercase ${tone}`}>{r.status === 'paid' ? '● Arrived' : r.status === 'on_the_way' ? '● On its way' : '● Not sent'}</span>
+            <span className={`font-mono text-[11px] tracking-[0.12em] uppercase ${tone}`}>{r.status === 'paid' ? '● Arrived' : r.status === 'on_the_way' ? '● On its way' : r.status === 'scheduled' ? '● Scheduled' : '● Not sent'}</span>
             <span className="num text-[44px] leading-none tracking-[-0.04em]">{usdt(r.amount)} <span className="text-lg text-muted">USDT</span></span>
             {r.note && <span className="text-[13px] text-muted">{r.note}</span>}
           </div>

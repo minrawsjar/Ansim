@@ -333,7 +333,7 @@ export async function planBatch(instruction: string) {
   );
   db.transaction(() => {
     kept.forEach((k, i) => {
-      const sender = (lastSender.get(k.address) as { sender: string } | undefined)?.sender ?? 'Ansim agent';
+      const sender = (lastSender.get(k.address) as { sender: string } | undefined)?.sender ?? 'Ansim';
       ins.run(batchId, i + 2, sender, book.get(k.address)!.name, k.address, k.amount, String(k.amount / 1e6), k.note, 'pay', JSON.stringify({ ...k.why, action: 'pay' }), Date.now());
     });
   })();
@@ -632,19 +632,32 @@ export function evidence(batchId: number) {
   };
 }
 
-const csvCell = (v: unknown) => {
-  const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+// Spreadsheet apps run a cell that starts with = + - or @ as a formula. Names and notes come from uploaded
+// files, so such text gets a leading apostrophe and stays plain text.
+export const csvCell = (v: unknown) => {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
+const iso = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString() : '');
 
 export function exportCsv(batchId: number) {
-  const head = ['line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason', 'request_id', 'trace_id', 'txn_hash', 'fee_usdt', 'flags', 'receipt_link'];
-  const lines = batchRows(batchId).map((r) =>
-    [r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason, requestIdOf(r), r.trace_id, r.txn_hash, r.fee != null ? (r.fee / 1e6).toFixed(6) : '', JSON.parse(r.flags).join(' '), r.decision === 'pay' ? `/r/${receiptToken(r)}` : '']
-      .map(csvCell)
-      .join(','),
-  );
-  return '﻿' + [head.join(','), ...lines].join('\n');
+  const site = process.env.PUBLIC_SITE_URL?.replace(/\/$/, '') ?? '';
+  const head = [
+    'line', 'sender', 'recipient', 'wallet', 'amount_usdt', 'note', 'decision', 'status', 'reason',
+    'paid_at_utc', 'fee_usdt', 'txn_hash', 'tronscan_url', 'request_id', 'trace_id', 'flags',
+    'receipt_link', 'family_confirmed_utc', 'family_city',
+  ];
+  const lines = batchRows(batchId).map((r) => {
+    const ack = r.ack ? (JSON.parse(r.ack) as Ack) : null;
+    return [
+      r.line, r.sender, r.name, r.receiver, r.amount != null ? (r.amount / 1e6).toFixed(6) : r.amount_raw, r.note, r.decision, r.state, r.reason,
+      r.state === 'SUCCEED' ? iso(paidAtMs(r.id)) : '', r.fee != null ? (r.fee / 1e6).toFixed(6) : '', r.txn_hash, r.txn_hash ? `https://nile.tronscan.org/#/transaction/${r.txn_hash}` : '',
+      requestIdOf(r), r.trace_id, JSON.parse(r.flags).join(' '),
+      r.decision === 'pay' ? `${site}/r/${receiptToken(r)}` : '', iso(ack ? ack.at * 1000 : null), ack?.city ?? '',
+    ].map(csvCell).join(',');
+  });
+  return '\ufeff' + [head.join(','), ...lines].join('\n');
 }
 
 // The latest payments across all batches, for the payout map on the home page.
@@ -662,17 +675,21 @@ export function recentPayments() {
 /* ---------------- family receipts & disputes ---------------- */
 
 // The family's receipt page. Public, but only reachable through the row's unguessable token.
+// When a row was paid, from its log: the ROW_STATE that said SUCCEED, or a recovery that found it on chain.
+const paidAtMs = (rowId: number) =>
+  (db
+    .prepare(`SELECT ts_ms FROM events WHERE row_id = ? AND (type = 'ROW_RECOVERED' OR (type = 'ROW_STATE' AND body LIKE '%"state":"SUCCEED"%')) ORDER BY id DESC LIMIT 1`)
+    .get(rowId) as { ts_ms: number } | undefined)?.ts_ms ?? null;
+
 export async function familyReceipt(token: string) {
   const r = db.prepare('SELECT * FROM rows WHERE receipt_token = ?').get(token) as Row | undefined;
   if (!r || r.decision !== 'pay') throw new Error('Receipt not found.');
-  const paid = db
-    .prepare(`SELECT ts_ms FROM events WHERE row_id = ? AND (type = 'ROW_RECOVERED' OR (type = 'ROW_STATE' AND body LIKE '%"state":"SUCCEED"%')) ORDER BY id DESC LIMIT 1`)
-    .get(r.id) as { ts_ms: number } | undefined;
-  const status = r.state === 'SUCCEED' ? 'paid' : r.state === 'REFUSED' || r.state === 'FAILED' ? 'not_sent' : 'on_the_way';
+  // READY has not been signed yet, so it is only scheduled; anything after that is on its way.
+  const status = r.state === 'SUCCEED' ? 'paid' : r.state === 'REFUSED' || r.state === 'FAILED' ? 'not_sent' : r.state === 'READY' ? 'scheduled' : 'on_the_way';
   return {
     status, sender: r.sender, name: r.name, amount: r.amount, note: r.note, wallet: r.receiver,
     country: payeeBook().find((p) => p.address === r.receiver)?.country ?? null,
-    txnHash: status === 'paid' ? r.txn_hash : null, paidAt: paid?.ts_ms ?? null,
+    txnHash: status === 'paid' ? r.txn_hash : null, paidAt: status === 'paid' ? paidAtMs(r.id) : null,
     ack: r.ack ? (JSON.parse(r.ack) as Ack) : null,
     telegramBot: await botUsername().catch(() => null), // for the family's 'message me on Telegram' link
   };

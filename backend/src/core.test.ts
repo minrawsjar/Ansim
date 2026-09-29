@@ -116,3 +116,14 @@ test('wallet history flags contracts, mule inflows, frozen senders and new walle
   assert.equal(walletRisk({ ...clean, frozenSenders: [A] }, now).level, 'high');
   assert.equal(walletRisk({ ...clean, isContract: true }, now).level, 'high');
 });
+
+test('CSV cells cannot run as spreadsheet formulas', async () => {
+  const { csvCell } = await import('./desk');
+  assert.equal(csvCell('=HYPERLINK("http://x","click")'), `"'=HYPERLINK(""http://x"",""click"")"`);
+  assert.equal(csvCell('+82 10'), "'+82 10");
+  assert.equal(csvCell('@SUM(A1)'), "'@SUM(A1)");
+  assert.equal(csvCell('9월 생활비'), '9월 생활비');
+  assert.equal(csvCell('2.500000'), '2.500000');
+  assert.equal(csvCell('a,b'), '"a,b"');
+  assert.equal(csvCell(null), '');
+});
