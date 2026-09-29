@@ -38,7 +38,7 @@ function Modebar({ s }: { s: Status }) {
     { ok: s.kiln, label: 'Kiln AI', hint: 'add KILN_BASE_URL and KILN_API_KEY' },
     { ok: !!s.registry, label: 'Registry', hint: 'run npm run deploy:contracts' },
     { ok: s.notary, label: 'Notary', hint: 'run npm run setup' },
-    { ok: s.telegram, label: 'Telegram alerts', hint: 'optional, add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID' },
+    { ok: s.telegram && s.telegramChats > 0, label: `Telegram alerts${s.telegram ? ` · ${s.telegramChats} ${s.telegramChats === 1 ? 'chat' : 'chats'}` : ''}`, hint: s.telegram ? 'connect a chat' : 'optional, add TELEGRAM_BOT_TOKEN' },
   ];
   return (
     <section className="mb-[18px] flex flex-col gap-3 rounded-lg border border-line bg-[#151d18] px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
@@ -55,7 +55,8 @@ function Modebar({ s }: { s: Status }) {
           </span>
         ))}
         {s.simulateLostLine && <span className="text-warn">Demo: line {s.simulateLostLine} response dropped</span>}
-        {s.telegram && <TestAlert />}
+        {s.telegram && <ConnectTelegram />}
+        {s.telegram && s.telegramChats > 0 && <TestAlert />}
       </div>
     </section>
   );
@@ -64,6 +65,28 @@ function Modebar({ s }: { s: Status }) {
 type DeskProps = { status: Status; policy: Policy | null; committed: number; reload: () => void };
 
 // Step 1 picks who may be paid; step 2 signs the limits for exactly that selection.
+// Opens the bot with a one-time code. Pressing Start in Telegram subscribes that chat to the owner's alerts.
+function ConnectTelegram() {
+  const [note, setNote] = useState<string | null>(null);
+  const connect = async () => {
+    const tab = window.open('about:blank', '_blank'); // opened now, while the click still counts, then pointed at the bot
+    try {
+      const { url } = await api<{ url: string }>('/api/telegram/link', { json: {} });
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+      setNote('Press Start in Telegram');
+    } catch (e) {
+      tab?.close();
+      setNote((e as Error).message);
+    }
+  };
+  return (
+    <button type="button" onClick={connect} className="text-celadon underline-offset-2 hover:underline">
+      {note ?? 'Connect my Telegram ↗'}
+    </button>
+  );
+}
+
 function TestAlert() {
   const [note, setNote] = useState<string | null>(null);
   const send = () => api('/api/alerts/test', { json: {} }).then(() => setNote('Sent')).catch((e) => setNote(e.message));

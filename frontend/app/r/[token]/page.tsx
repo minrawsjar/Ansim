@@ -9,13 +9,14 @@ type Receipt = {
   status: 'paid' | 'on_the_way' | 'not_sent'; sender: string | null; name: string | null; amount: number | null; note: string | null;
   wallet: string; country: string | null; txnHash: string | null; paidAt: number | null;
   ack: { at: number; city: string | null } | null;
+  telegramBot: string | null;
 };
 type Words = {
   locale: string; heading: string; check: string; noFee: string;
   paid: (s: string, n: string, a: string, w: string, date: string, time: string) => string;
   onTheWay: (s: string, n: string, a: string) => string;
   notSent: string;
-  confirm: string; shareCity: string; thanks: string;
+  confirm: string; shareCity: string; thanks: string; telegram: string;
 };
 
 // Plain, short sentences so they survive translation. They should still be checked by a native speaker.
@@ -25,35 +26,35 @@ const LANG: Record<string, Words> = {
     paid: (s, n, a, w, date, time) => `${s} đã gửi ${a} USDT cho ${n}. Tiền đã vào ví có đuôi ${w} lúc ${time} ngày ${date}.`,
     onTheWay: (s, n, a) => `${s} đang gửi ${a} USDT cho ${n}. Tiền đang trên đường đến.`,
     notSent: 'Khoản tiền này chưa được gửi. Vui lòng liên hệ người gửi.',
-    confirm: 'Tôi đã nhận được tiền', shareCity: 'Chia sẻ thành phố của tôi (không phải vị trí chính xác)', thanks: 'Cảm ơn. Người gửi sẽ thấy bạn đã nhận được tiền.',
+    confirm: 'Tôi đã nhận được tiền', telegram: 'Nhận tin nhắn Telegram khi tiền đến', shareCity: 'Chia sẻ thành phố của tôi (không phải vị trí chính xác)', thanks: 'Cảm ơn. Người gửi sẽ thấy bạn đã nhận được tiền.',
   },
   tl: {
     locale: 'fil-PH', heading: 'Resibo ng padala', check: 'Tingnan sa TRONSCAN', noFee: 'Walang bayad na ibinawas sa halagang ito.',
     paid: (s, n, a, w, date, time) => `Nagpadala si ${s} ng ${a} USDT kay ${n}. Pumasok ito sa wallet na nagtatapos sa ${w} noong ${date}, ${time}.`,
     onTheWay: (s, n, a) => `Nagpapadala si ${s} ng ${a} USDT kay ${n}. Papunta na ito.`,
     notSent: 'Hindi naipadala ang perang ito. Makipag-ugnayan sa nagpadala.',
-    confirm: 'Natanggap ko na ang pera', shareCity: 'Ibahagi ang aking lungsod (hindi ang eksaktong lokasyon)', thanks: 'Salamat. Makikita ng nagpadala na natanggap mo ito.',
+    confirm: 'Natanggap ko na ang pera', telegram: 'Makatanggap ng mensahe sa Telegram kapag dumating ang pera', shareCity: 'Ibahagi ang aking lungsod (hindi ang eksaktong lokasyon)', thanks: 'Salamat. Makikita ng nagpadala na natanggap mo ito.',
   },
   ne: {
     locale: 'ne-NP', heading: 'रकम पठाएको रसिद', check: 'TRONSCAN मा हेर्नुहोस्', noFee: 'यो रकमबाट कुनै शुल्क काटिएको छैन।',
     paid: (s, n, a, w, date, time) => `${s} ले ${n} लाई ${a} USDT पठाउनुभयो। यो ${date} ${time} मा ${w} मा अन्त्य हुने वालेटमा आइपुग्यो।`,
     onTheWay: (s, n, a) => `${s} ले ${n} लाई ${a} USDT पठाउँदै हुनुहुन्छ। यो बाटोमा छ।`,
     notSent: 'यो रकम पठाइएको छैन। कृपया पठाउने व्यक्तिलाई सम्पर्क गर्नुहोस्।',
-    confirm: 'मैले रकम पाएँ', shareCity: 'मेरो सहर साझा गर्नुहोस् (ठ्याक्कै स्थान होइन)', thanks: 'धन्यवाद। पठाउने व्यक्तिले तपाईंले रकम पाउनुभएको देख्नुहुनेछ।',
+    confirm: 'मैले रकम पाएँ', telegram: 'रकम आइपुग्दा Telegram मा सन्देश पाउनुहोस्', shareCity: 'मेरो सहर साझा गर्नुहोस् (ठ्याक्कै स्थान होइन)', thanks: 'धन्यवाद। पठाउने व्यक्तिले तपाईंले रकम पाउनुभएको देख्नुहुनेछ।',
   },
   ko: {
     locale: 'ko-KR', heading: '송금 영수증', check: 'TRONSCAN에서 확인하기', noFee: '받는 금액에서 수수료가 빠지지 않았습니다.',
     paid: (s, n, a, w, date, time) => `${s}님이 ${n}님께 ${a} USDT를 보냈습니다. ${date} ${time}에 끝자리 ${w} 지갑으로 입금되었습니다.`,
     onTheWay: (s, n, a) => `${s}님이 ${n}님께 ${a} USDT를 보내는 중입니다.`,
     notSent: '이 송금은 보내지지 않았습니다. 송금한 분께 문의해 주세요.',
-    confirm: '받았습니다', shareCity: '내 도시 공유 (정확한 위치 아님)', thanks: '감사합니다. 송금한 분께 수령 확인이 전달됩니다.',
+    confirm: '받았습니다', telegram: '돈이 도착하면 텔레그램으로 알림 받기', shareCity: '내 도시 공유 (정확한 위치 아님)', thanks: '감사합니다. 송금한 분께 수령 확인이 전달됩니다.',
   },
   en: {
     locale: 'en-GB', heading: 'Payment receipt', check: 'Check it on TRONSCAN', noFee: 'No fee was taken from this amount.',
     paid: (s, n, a, w, date, time) => `${s} sent ${a} USDT to ${n}. It arrived in the wallet ending ${w} on ${date} at ${time}.`,
     onTheWay: (s, n, a) => `${s} is sending ${a} USDT to ${n}. It is on its way.`,
     notSent: 'This payment was not sent. Please contact the sender.',
-    confirm: 'I received it', shareCity: 'Share my city (not my exact location)', thanks: 'Thank you. The sender will see that you received it.',
+    confirm: 'I received it', telegram: 'Get a Telegram message when money arrives', shareCity: 'Share my city (not my exact location)', thanks: 'Thank you. The sender will see that you received it.',
   },
 };
 const BY_COUNTRY: Record<string, string> = { vietnam: 'vi', philippines: 'tl', nepal: 'ne' };
@@ -148,6 +149,17 @@ export default function FamilyReceipt() {
           )}
           <div className="border-t border-line pt-5"><Block w={LANG.ko} r={r} /></div>
           {lang !== 'en' && <div className="border-t border-line pt-5"><Block w={LANG.en} r={r} /></div>}
+          {r.telegramBot && r.status !== 'not_sent' && (
+            <a
+              lang={LANG[lang].locale}
+              href={`https://t.me/${r.telegramBot}?start=r_${token}`}
+              target="_blank"
+              rel="noopener"
+              className="rounded-[7px] border border-line px-4 py-3 text-center text-[13px] text-[#c8d1c7] hover:bg-raised"
+            >
+              {LANG[lang].telegram} ↗
+            </a>
+          )}
           <p className="border-t border-line pt-4 font-mono text-[11px] break-all text-muted">{r.wallet}</p>
         </section>
       )}

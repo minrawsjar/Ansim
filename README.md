@@ -153,7 +153,12 @@ The demo contacts are real Nile wallets named Dummy 1 to Dummy 6; `npm run setup
 
 ## Alerts
 
-With `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set, the owner gets a Telegram message for every refusal, failure, Stop, new contact, batch approval and finished batch. Create a bot with @BotFather, send it a message, and read the chat id from `https://api.telegram.org/bot<token>/getUpdates`. The console has a test button.
+Ansim's Telegram bot (`@ansimbot` in the demo) messages two kinds of people:
+
+- **Owners and operators** get every refusal, failure, Stop, new contact, approval, vault release, family confirmation and finished batch. **Connect my Telegram** in the console opens the bot with a one-time code that expires in 10 minutes; pressing Start subscribes that chat. Finding the bot alone subscribes no one.
+- **Families** open the Telegram link on their receipt page. The bot then tells them in their language whenever money reaches their wallet, with the receipt link. `/stop` ends it.
+
+Set `TELEGRAM_BOT_TOKEN`, and `PUBLIC_API_URL` so the backend registers Telegram's webhook at startup. Telegram proves each webhook call with a secret header derived from the bot token, since it cannot send the backend key.
 
 ## Tokens and energy
 

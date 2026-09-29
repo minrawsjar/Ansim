@@ -16,7 +16,7 @@ export function logEvent(type: string, data: Record<string, unknown>, batchId: n
   const r = db
     .prepare('INSERT INTO events (ts_ms, type, batch_id, row_id, body, prev, hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ts, type, batchId, rowId, body, prev, hash);
-  alertFor(type, data, batchId);
+  alertFor(type, data, batchId, rowId);
   return { id: Number(r.lastInsertRowid), hash };
 }
 

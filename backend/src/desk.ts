@@ -10,6 +10,7 @@ import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFrom
 import { gasfree, gasfreeConfig, signPermit } from './gasfree';
 import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning, committed as committedFor } from './orchestrator';
 import { telegramConfigured } from './alerts';
+import { botUsername, ownerChatCount } from './telegram';
 
 const dataFile = (name: string) => new URL(`../data/${name}`, import.meta.url);
 const readJson = <T>(name: string, fallback: T): T => {
@@ -661,7 +662,7 @@ export function recentPayments() {
 /* ---------------- family receipts & disputes ---------------- */
 
 // The family's receipt page. Public, but only reachable through the row's unguessable token.
-export function familyReceipt(token: string) {
+export async function familyReceipt(token: string) {
   const r = db.prepare('SELECT * FROM rows WHERE receipt_token = ?').get(token) as Row | undefined;
   if (!r || r.decision !== 'pay') throw new Error('Receipt not found.');
   const paid = db
@@ -673,10 +674,11 @@ export function familyReceipt(token: string) {
     country: payeeBook().find((p) => p.address === r.receiver)?.country ?? null,
     txnHash: status === 'paid' ? r.txn_hash : null, paidAt: paid?.ts_ms ?? null,
     ack: r.ack ? (JSON.parse(r.ack) as Ack) : null,
+    telegramBot: await botUsername().catch(() => null), // for the family's 'message me on Telegram' link
   };
 }
 
-export function confirmReceipt(token: string, input: { city?: unknown; country?: unknown }) {
+export async function confirmReceipt(token: string, input: { city?: unknown; country?: unknown }) {
   const r = db.prepare('SELECT * FROM rows WHERE receipt_token = ?').get(token) as Row | undefined;
   if (!r || r.decision !== 'pay') throw new Error('Receipt not found.');
   if (r.state !== 'SUCCEED') throw new Error('This payment has not arrived yet.');
@@ -768,6 +770,7 @@ export function status() {
     registry: registryInfo()?.address ?? null,
     simulateLostLine: process.env.SIMULATE_LOST_RESPONSE_LINE ? Number(process.env.SIMULATE_LOST_RESPONSE_LINE) : null,
     telegram: telegramConfigured(),
+    telegramChats: telegramConfigured() ? ownerChatCount() : 0,
     rules: { contactWaitHours: rules.waitSec / 3600, travelRuleMin: rules.travelMin, travelRuleKrw: rules.travelKrw, krwPerUsdt: rules.krwPerUsdt },
     payees: payeeBook().map((p) => ({ ...p, month: payeeMonth(p.address) })),
   };

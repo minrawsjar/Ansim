@@ -8,7 +8,8 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { db, activePolicy, getBatch } from './db';
 import { isRunning, recoverBatch, precheck, committed } from './orchestrator';
-import { sendTelegram } from './alerts';
+import { sendTelegram, telegramConfigured } from './alerts';
+import { handleUpdate, ownerLink, ownerChatCount, botUsername, registerWebhook, webhookSecret } from './telegram';
 import { usdtTransferProof } from './tron';
 import {
   draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, setContactCity, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
@@ -27,7 +28,8 @@ const digest = (s: string) => createHash('sha256').update(s).digest();
 app.get('/health', (c) => c.json({ ok: true })); // open, for the host's health check
 if (BACKEND_KEY) {
   app.use('*', async (c, next) => {
-    if (c.req.path === '/api/health') return next();
+    // Telegram's webhook cannot send the backend key; it proves itself with its secret header instead.
+    if (c.req.path === '/api/health' || c.req.path === '/api/telegram/webhook') return next();
     if (!timingSafeEqual(digest(c.req.header('x-ansim-key') ?? ''), digest(BACKEND_KEY))) return c.json({ error: 'Missing or wrong backend key' }, 401);
     await next();
   });
@@ -143,8 +145,8 @@ app.get('/batches/:id/export', (c) => {
 app.get('/metrics', (c) => c.json(metrics()));
 
 // The family's receipt. The frontend lets this path through without the site password; the token is the key.
-app.get('/receipts/:token', (c) => c.json(familyReceipt(c.req.param('token'))));
-app.post('/receipts/:token/confirm', async (c) => c.json(confirmReceipt(c.req.param('token'), await c.req.json().catch(() => ({})))));
+app.get('/receipts/:token', async (c) => c.json(await familyReceipt(c.req.param('token'))));
+app.post('/receipts/:token/confirm', async (c) => c.json(await confirmReceipt(c.req.param('token'), await c.req.json().catch(() => ({})))));
 
 app.get('/disputes', (c) => c.json(findPayments(c.req.query('q') ?? '')));
 app.post('/disputes/ask', async (c) => {
@@ -166,10 +168,21 @@ app.post('/vault/freeze', async (c) => {
 });
 app.post('/vault/return', async (c) => c.json(await returnToVault()));
 
+app.post('/telegram/webhook', async (c) => {
+  if (!telegramConfigured() || !timingSafeEqual(digest(c.req.header('x-telegram-bot-api-secret-token') ?? ''), digest(webhookSecret()))) return c.json({ ok: false }, 401);
+  await handleUpdate(await c.req.json().catch(() => ({})));
+  return c.json({ ok: true });
+});
+app.post('/telegram/link', async (c) => c.json(await ownerLink()));
+app.get('/telegram', async (c) => c.json({ configured: telegramConfigured(), bot: await botUsername(), ownerChats: ownerChatCount() }));
+
 app.post('/alerts/test', async (c) => {
   await sendTelegram('Ansim test alert. Refusals, stops, failures, new contacts and finished batches will arrive here.');
   return c.json({ ok: true });
 });
 
 const port = Number(process.env.PORT ?? 4000);
-serve({ fetch: app.fetch, port }, () => console.log(`Ansim backend on http://localhost:${port}/api`));
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`Ansim backend on http://localhost:${port}/api`);
+  registerWebhook().catch(() => {});
+});

@@ -8,7 +8,7 @@ export type WalletRisk = {
 export type Payee = { name: string; country: string | null; city: string | null; address: string; usual: number; created_at: number; month: number; risk: WalletRisk | null };
 export type Rules = { contactWaitHours: number; travelRuleMin: number; travelRuleKrw: number; krwPerUsdt: number };
 export type Status = {
-  gasfree: boolean; kiln: boolean; payer: string | null; ownerFallback: boolean; notary: boolean; telegram: boolean;
+  gasfree: boolean; kiln: boolean; payer: string | null; ownerFallback: boolean; notary: boolean; telegram: boolean; telegramChats: number;
   registry: string | null; simulateLostLine: number | null; payees: Payee[]; rules: Rules;
 };
 export type Policy = {
