@@ -112,9 +112,74 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
   const selectAll = () => setSelected(status.payees.map((p) => p.address));
   return (
     <div className="grid min-w-0 gap-[18px]">
+      <Joiners setSelected={setSelected} reload={reload} />
       <Contacts payees={status.payees} rules={status.rules} signed={active ? signed : []} selected={selected} setSelected={setSelected} reload={reload} />
       <Limits status={status} policy={policy} committed={committed} reload={reload} selected={selected} changes={changes} coversNone={coversNone} selectAll={selectAll} />
     </div>
+  );
+}
+
+type Joiner = {
+  token: string; status: string; mode: 'own' | 'phone'; name: string; country: string; city: string | null; address: string; wallet: string;
+  risk: { level: string | null; flags: string[]; note: { ko: string; en: string } | null; error: string | null } | null;
+};
+
+// People who joined from the live demo and wait for the operator. Accepting adds their phone's GasFree account
+// as a contact, through the same checks as + Add contact, and ticks it for the next signed limits.
+function Joiners({ setSelected, reload }: { setSelected: React.Dispatch<React.SetStateAction<string[]>>; reload: () => void }) {
+  const [pending, setPending] = useState<Joiner[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let stop = false;
+    const tick = () => api<Joiner[]>('/api/joins').then((j) => !stop && setPending(j.filter((x) => x.status === 'pending'))).catch(() => {});
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, []);
+  const decide = async (j: Joiner, action: 'accept' | 'reject') => {
+    setBusy(`${action}${j.token}`);
+    setError(null);
+    try {
+      const all = await api<Joiner[]>(`/api/joins/${j.token}/${action}`, { json: {} });
+      if (action === 'accept') setSelected((s) => [...s, j.wallet]);
+      setPending(all.filter((x) => x.status === 'pending'));
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (!pending.length) return null;
+  return (
+    <Card eyebrow="Live demo · joined from a phone" title={`${pending.length} waiting to be accepted`} action={<Link href="/stage" className="text-xs text-celadon hover:underline">Open the live demo →</Link>}>
+      <div className="grid gap-2">
+        <ErrorLine error={error} />
+        {pending.map((j) => (
+          <div key={j.token} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-sunken px-4 py-3">
+            <div className="grid min-w-0 gap-0.5">
+              <span className="text-[14px]">{j.name} <span className="text-muted">· {j.city ?? '–'}, {j.country}</span></span>
+              <span className="text-[11px] text-muted">{j.mode === 'own' ? 'Own wallet' : 'Made on the phone'} <Addr a={j.address} /> · paid to its GasFree account <Addr a={j.wallet} /></span>
+              <span className="text-[12px]">
+                {!j.risk ? <span className="text-muted">Checking the wallet’s public record…</span>
+                  : j.risk.error ? <span className="text-warn">The wallet check could not finish</span>
+                  : <span className={j.risk.level === 'none' ? 'text-celadon' : j.risk.level === 'high' ? 'text-stop' : 'text-warn'}>{j.risk.level === 'none' ? '✓ No risk signals' : j.risk.flags.map((f) => WALLET_FLAGS[f] ?? f).join(' · ')}</span>}
+                {j.risk?.note?.en && <span className="block text-[11px] text-muted">{j.risk.note.en}</span>}
+              </span>
+            </div>
+            <span className="flex gap-2">
+              <Button kind="primary" busy={busy === `accept${j.token}`} onClick={() => decide(j, 'accept')}>Accept</Button>
+              <Button kind="quiet" busy={busy === `reject${j.token}`} onClick={() => decide(j, 'reject')}>Reject</Button>
+            </span>
+          </div>
+        ))}
+        <p className="text-[11px] text-muted">Accepting runs the same checks as + Add contact and ticks them. Then sign new limits so they can be paid.</p>
+      </div>
+    </Card>
   );
 }
 

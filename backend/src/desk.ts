@@ -39,7 +39,7 @@ export function screenRules() {
 // Seeded once from data/payees.json, then edited in the console. user_version records which seed steps
 // ran, so removing every contact does not bring the demo contacts back. Seeded contacts get
 // created_at 0: they were paid before, so they skip the waiting period for new contacts.
-type Risk = { checkedAt: number; level?: string; flags?: string[]; facts?: Awaited<ReturnType<typeof walletFacts>>; note?: { ko: string; en: string } | null; error?: string };
+export type Risk = { checkedAt: number; level?: string; flags?: string[]; facts?: Awaited<ReturnType<typeof walletFacts>>; note?: { ko: string; en: string } | null; error?: string };
 type Contact = { address: string; name: string; country: string | null; city: string | null; usual: number; created_at: number; risk: Risk | null };
 export function payeeBook(): Contact[] {
   const version = db.pragma('user_version', { simple: true }) as number;
@@ -58,7 +58,7 @@ export function payeeBook(): Contact[] {
 }
 
 // Reads the wallet's public history, derives risk flags in code, and asks the model to explain them.
-async function walletCheck(address: string): Promise<Risk> {
+export async function walletCheck(address: string): Promise<Risk> {
   try {
     const facts = await walletFacts(address);
     const risk = walletRisk(facts);
@@ -80,7 +80,8 @@ export async function checkContact(address: string) {
   return payeeBook();
 }
 
-export async function addContact(input: { name?: string; country?: string; city?: string; address?: string; usual?: number | string }) {
+// `risk` is a wallet check already made, for example on a live-demo joiner's own wallet rather than the GasFree account paid.
+export async function addContact(input: { name?: string; country?: string; city?: string; address?: string; usual?: number | string; risk?: Risk }) {
   const name = String(input.name ?? '').trim().slice(0, 80);
   const address = String(input.address ?? '').trim();
   const usual = Number(input.usual || 0);
@@ -91,7 +92,7 @@ export async function addContact(input: { name?: string; country?: string; city?
   if ((await isTetherFrozen(address)) === true) throw new Error('Tether has frozen this wallet on mainnet.');
   const country = String(input.country ?? '').trim().slice(0, 40) || null;
   const city = String(input.city ?? '').trim().slice(0, 60) || null;
-  const risk = await walletCheck(address);
+  const risk = input.risk ?? (await walletCheck(address));
   db.prepare('INSERT INTO payees (address, name, country, city, usual, created_at, risk) VALUES (?, ?, ?, ?, ?, ?, ?)').run(address, name, country, city, usual, nowSec(), JSON.stringify(risk));
   logEvent('CONTACT_ADDED', { address, name, country, usual, riskLevel: risk.level ?? null, riskFlags: risk.flags ?? [] });
   return payeeBook();
@@ -117,7 +118,7 @@ export function removeContact(address: string) {
 
 const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6), added: p.created_at, risk: p.risk?.level }]));
 // Stand-in for wallets reported to police and exchanges.
-const reported = () => new Set(readJson<string[]>('reported.json', []));
+export const reported = () => new Set(readJson<string[]>('reported.json', []));
 
 /* ---------------- policy ---------------- */
 

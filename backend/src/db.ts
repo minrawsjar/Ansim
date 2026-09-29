@@ -141,6 +141,8 @@ function open() {
   addColumn('payees', 'risk', 'TEXT');
   addColumn('payees', 'city', 'TEXT');
   addColumn('rows', 'ack', 'TEXT');
+  addColumn('joins', 'mode', 'TEXT');
+  addColumn('joins', 'risk', 'TEXT');
   return d;
 }
 

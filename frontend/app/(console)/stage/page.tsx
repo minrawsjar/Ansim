@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { renderSVG } from 'uqr';
-import { api, usdt, signWithTronLink, type Policy, type TypedDraft } from '../../lib';
+import { api, usdt, signWithTronLink, WALLET_FLAGS, type Policy, type TypedDraft } from '../../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, TxLink, WaitingForTronLink } from '../../ui';
 import { FlowMap } from '../../flow-map';
 
@@ -11,7 +11,8 @@ import { FlowMap } from '../../flow-map';
 // accepts them, adds them to the owner's signed limits, and pays them like any other batch.
 
 type Joiner = {
-  token: string; status: 'pending' | 'accepted'; name: string; country: string; city: string | null; wallet: string; joinedAt: number;
+  token: string; status: 'pending' | 'accepted'; mode: 'own' | 'phone'; name: string; country: string; city: string | null; address: string; wallet: string; joinedAt: number;
+  risk: { level: string | null; flags: string[]; note: { ko: string; en: string } | null; error: string | null } | null;
   payableAt: number | null;
   payment: { state: string; amount: number | null; reason: string | null; txnHash: string | null; confirmed: boolean } | null;
   sentBack: { state: string; value: number; txnHash: string | null } | null;
@@ -33,6 +34,18 @@ function Qr({ url }: { url: string }) {
   if (!url) return <div className="aspect-square w-full rounded-xl bg-white" />;
   // White quiet zone and dark modules on white, whatever the page theme: phone cameras need the contrast.
   return <div className="aspect-square w-full rounded-xl bg-white p-3 [&>svg]:h-full [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: renderSVG(url, { ecc: 'M', border: 1 }) }} />;
+}
+
+// The wallet check made when they joined: code sets the flags, the AI explains them, the operator decides.
+function RiskLine({ risk }: { risk: Joiner['risk'] }) {
+  if (!risk) return <span className="text-muted">Checking…</span>;
+  if (risk.error) return <span className="text-warn">Check failed</span>;
+  const tone = risk.level === 'none' ? 'text-celadon' : risk.level === 'high' ? 'text-stop' : 'text-warn';
+  return (
+    <span title={[...risk.flags.map((f) => WALLET_FLAGS[f] ?? f), risk.note?.en].filter(Boolean).join('\n')} className={`${tone} cursor-help`}>
+      {risk.level === 'none' ? '✓ No risk signals' : `${risk.level === 'high' ? 'High risk' : 'Review'} · ${risk.flags.map((f) => WALLET_FLAGS[f] ?? f).join(', ')}`}
+    </span>
+  );
 }
 
 export default function StagePage() {
@@ -180,16 +193,20 @@ export default function StagePage() {
           <p className="text-xs text-muted">Nobody has joined yet. Show the QR code.</p>
         ) : (
           <div className="-mx-5 overflow-x-auto sm:-mx-6">
-            <table className="w-full min-w-[52rem] border-collapse text-left text-[13px] [&_tr>*:first-child]:pl-5 sm:[&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-5">
+            <table className="w-full min-w-[64rem] border-collapse text-left text-[13px] [&_tr>*:first-child]:pl-5 sm:[&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-5">
               <thead className="border-y border-line font-mono text-[9px] tracking-[0.1em] text-muted uppercase">
-                <tr>{['Name', 'City', 'GasFree account', 'Contact', 'Payment', 'Sent back'].map((h) => <th key={h} className="px-3 py-2.5 font-normal">{h}</th>)}</tr>
+                <tr>{['Name', 'City', 'Wallet check', 'GasFree account', 'Contact', 'Payment', 'Sent back'].map((h) => <th key={h} className="px-3 py-2.5 font-normal">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {joiners.map((j) => (
                   <tr key={j.token} className="border-b border-line/60 align-middle last:border-0">
                     <td className="px-3 py-3">{j.name}</td>
                     <td className="px-3 py-3 text-muted">{j.city ?? '–'}, {j.country}</td>
-                    <td className="px-3 py-3"><Addr a={j.wallet} /></td>
+                    <td className="px-3 py-3"><RiskLine risk={j.risk} /></td>
+                    <td className="px-3 py-3">
+                      <Addr a={j.wallet} />
+                      <div className="text-[11px] text-muted">{j.mode === 'own' ? 'Own wallet' : 'Made on the phone'} <Addr a={j.address} /></div>
+                    </td>
                     <td className="px-3 py-3">
                       {j.status === 'pending' ? (
                         <span className="flex gap-2">

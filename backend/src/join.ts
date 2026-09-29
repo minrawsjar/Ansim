@@ -5,14 +5,16 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { db, nowSec, type Row } from './db';
 import { logEvent } from './log';
-import { validAddress } from './screen';
+import { validAddress, contactProblem } from './screen';
 import { gasfree, gasfreeConfig, permitDomain, permitTypes } from './gasfree';
-import { tw, usdtBalance, vaultInfo } from './tron';
-import { addContact, payeeBook, screenRules, receiptToken, paidAtMs } from './desk';
+import { tw, usdtBalance, vaultInfo, isTetherFrozen } from './tron';
+import { addContact, payeeBook, screenRules, receiptToken, paidAtMs, walletCheck, reported, type Risk } from './desk';
 
 type Join = {
   token: string; address: string; wallet: string; name: string; country: string; city: string | null;
   status: 'pending' | 'accepted' | 'rejected'; sent_back: string | null; created_at: number;
+  mode: 'own' | 'phone' | null; // their own wallet, or one the phone page made
+  risk: string | null; // the wallet check of their own address, made when they join
 };
 type SentBack = { traceId: string; state: string; value: number; txnHash: string | null; at: number; checkedAt: number };
 
@@ -28,22 +30,40 @@ function getJoin(token: string) {
   return j;
 }
 
-export async function requestJoin(input: { address?: unknown; name?: unknown; country?: unknown; city?: unknown }) {
+// A person joins with their own TRON wallet, or one the phone page made. Ansim pays their GasFree account,
+// which GasFree derives from that wallet: only the wallet's key can move money out of it, and GasFree takes its
+// fee in USDT, so they never need TRX. Blocking checks run now, so a bad wallet is turned away at the door.
+export async function requestJoin(input: { address?: unknown; name?: unknown; country?: unknown; city?: unknown; mode?: unknown }) {
   const address = String(input.address ?? '').trim();
   const name = String(input.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const country = COUNTRIES.find((c) => c === input.country);
   const city = String(input.city ?? '').trim().slice(0, 60) || null;
-  if (!validAddress(address)) throw new Error('The phone made an invalid wallet address. Reload and try again.');
+  const mode = input.mode === 'own' ? 'own' : 'phone';
+  if (!validAddress(address)) throw new Error('That is not a valid TRON address. It starts with T and has 34 characters.');
   if (!name) throw new Error('Enter a name.');
   if (!country) throw new Error('Pick Vietnam, the Philippines or Nepal.');
-  if (db.prepare('SELECT 1 FROM joins WHERE address = ?').get(address)) throw new Error('This phone’s wallet has already joined.');
+  if (db.prepare('SELECT 1 FROM joins WHERE address = ?').get(address)) throw new Error('This wallet has already joined.');
   const pending = (db.prepare("SELECT COUNT(*) AS n FROM joins WHERE status = 'pending'").get() as { n: number }).n;
   if (pending >= MAX_PENDING) throw new Error('Too many people are waiting to be accepted. Try again in a minute.');
   const { gasFreeAddress } = await gasfree.account(address);
+  const bad = reported();
+  const blocked =
+    (bad.has(address) ? 'This wallet is on the reported scam list.' : null) ??
+    contactProblem(gasFreeAddress, payeeBook(), bad) ??
+    ((await isTetherFrozen(address)) === true ? 'Tether has frozen this wallet on mainnet.' : null);
+  if (blocked) {
+    logEvent('JOIN_BLOCKED', { name, country, mode, address, reason: blocked });
+    throw new Error(`Ansim can’t add this wallet: ${blocked}`);
+  }
   const token = randomBytes(12).toString('base64url');
-  db.prepare('INSERT INTO joins (token, address, wallet, name, country, city, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(token, address, gasFreeAddress, name, country, city, nowSec());
-  logEvent('JOIN_REQUESTED', { name, country, city, wallet: gasFreeAddress });
+  db.prepare('INSERT INTO joins (token, address, wallet, name, country, city, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(token, address, gasFreeAddress, name, country, city, mode, nowSec());
+  logEvent('JOIN_REQUESTED', { name, country, city, mode, address, wallet: gasFreeAddress });
+  // The wallet's public history on mainnet, with the AI's plain-words explanation. Code sets the flags; the operator decides.
+  void walletCheck(address).then((risk) => {
+    db.prepare('UPDATE joins SET risk = ? WHERE token = ?').run(JSON.stringify(risk), token);
+    logEvent('JOIN_CHECKED', { name, address, level: risk.level ?? null, flags: risk.flags ?? [], error: risk.error ?? null });
+  });
   return { token };
 }
 
@@ -84,6 +104,11 @@ async function fxFor(country: string) {
   return currency ? { currency, perUsdt: fx.rates[currency] ?? FIXED[currency], live: fx.live } : null;
 }
 
+const riskOf = (j: Join) => {
+  const r = j.risk ? (JSON.parse(j.risk) as Risk) : null;
+  return r && { level: r.level ?? null, flags: r.flags ?? [], note: r.note ?? null, error: r.error ?? null };
+};
+
 async function view(j: Join, withBalance: boolean) {
   const contact = payeeBook().find((p) => p.address === j.wallet);
   // A row still in a draft (READY) has not been sent, so the latest sent or refused one is the payment.
@@ -91,6 +116,7 @@ async function view(j: Join, withBalance: boolean) {
   const sentBack = await sentBackOf(j);
   return {
     token: j.token, status: j.status, name: j.name, country: j.country, city: j.city, address: j.address, wallet: j.wallet, joinedAt: j.created_at,
+    mode: j.mode ?? 'phone', risk: riskOf(j),
     // New contacts wait before they can be paid (the delayed-transfer rule); seeded contacts have created_at 0.
     payableAt: contact?.created_at ? contact.created_at + screenRules().waitSec : null,
     payment: row ? { state: row.state, amount: row.amount, reason: row.reason, txnHash: row.txn_hash, receiptToken: receiptToken(row), paidAt: row.state === 'SUCCEED' ? paidAtMs(row.id) : null, confirmed: !!row.ack } : null,
@@ -116,7 +142,9 @@ export async function listJoins() {
 export async function acceptJoin(token: string) {
   const j = getJoin(token);
   if (j.status !== 'pending') throw new Error(`${j.name} is already ${j.status}.`);
-  await addContact({ name: j.name, country: j.country, city: j.city ?? undefined, address: j.wallet, usual: 0 });
+  // The risk is their own wallet's history; the GasFree account paid is new and has none of its own.
+  const risk = j.risk ? (JSON.parse(j.risk) as Risk) : await walletCheck(j.address);
+  await addContact({ name: j.name, country: j.country, city: j.city ?? undefined, address: j.wallet, usual: 0, risk });
   db.prepare("UPDATE joins SET status = 'accepted' WHERE token = ?").run(token);
   logEvent('JOIN_ACCEPTED', { name: j.name, wallet: j.wallet });
   return listJoins();
