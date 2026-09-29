@@ -108,6 +108,17 @@ The console runs on Vercel. The backend stays on the demo laptop, because it hol
 
 A quick tunnel gets a new address each time it starts, so update `BACKEND_URL` and redeploy after a restart.
 
+## Live on Nile
+
+| What | Link |
+|---|---|
+| AnsimRegistry contract | [TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq](https://nile.tronscan.org/#/contract/TUcz2dryzQLTTyTFooLwoFxP5cWugCq8xq) |
+| First real test: policy recorded | [0565f2e9…1a177](https://nile.tronscan.org/#/transaction/0565f2e9302745773357709e132a5a75c466ccfa5f94dcf6308994e450c1a177) |
+| First real test: GasFree payment, 0.50 USDT plus 1.30 fee | [e30fe082…ed258](https://nile.tronscan.org/#/transaction/e30fe0822003ab98bffacaf0dc7c3e71e382ee95bcbe85d15a054aecf0fed258) |
+| First real test: batch sealed | [8a1e696f…9fc29](https://nile.tronscan.org/#/transaction/8a1e696fe0544cb008a2220a015d5b37532f605655a15c46592b4c5d9174fc29) |
+
+In that test, a second row to a payee left off the policy was refused and recorded, and `verify.mjs` passed all 11 checks against the chain.
+
 ## Demo runs
 
 The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추석 보너스), and 8 that must not be paid. Those are a duplicate, a lookalike of a known payee's wallet, an invalid address, three senders paying one new wallet, a Tether-frozen wallet and a reported wallet.
