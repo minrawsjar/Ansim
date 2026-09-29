@@ -11,7 +11,7 @@ import { isRunning, recoverBatch, precheck, committed } from './orchestrator';
 import { sendTelegram } from './alerts';
 import { usdtTransferProof } from './tron';
 import {
-  draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
+  draftPolicy, activatePolicy, stopPolicy, addContact, removeContact, checkContact, importFile, editRow, reviewFlags, writeReceipt, askAuditor,
   batchView, evidence, exportCsv, metrics, status, recheck, approvalDraft, approveBatch, payBatch,
   familyReceipt, findPayments, askDispute,
   vaultView, freezeVault, noteVaultFreeze, returnToVault, recentPayments,
@@ -51,6 +51,7 @@ app.post('/policy/stop', async (c) => c.json(await stopPolicy()));
 
 app.post('/payees', async (c) => c.json(await addContact(await c.req.json())));
 app.delete('/payees/:address', (c) => c.json(removeContact(c.req.param('address'))));
+app.post('/payees/:address/check', async (c) => c.json(await checkContact(c.req.param('address'))));
 
 app.get('/batches', (c) =>
   c.json(db.prepare('SELECT b.*, (SELECT COUNT(*) FROM rows r WHERE r.batch_id = b.id) AS row_count FROM batches b ORDER BY id DESC').all()),

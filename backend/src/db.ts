@@ -125,6 +125,7 @@ function open() {
   addColumn('rows', 'travel', 'TEXT');
   addColumn('policies', 'record_key', 'INTEGER');
   addColumn('batches', 'record_key', 'INTEGER');
+  addColumn('payees', 'risk', 'TEXT');
   return d;
 }
 

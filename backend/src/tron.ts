@@ -113,6 +113,43 @@ export async function findUsdtTransfer(from: string, to: string, value: number, 
   return hit?.transaction_id ?? null;
 }
 
+/* ---------------- wallet history (mainnet) ---------------- */
+
+// Real families' wallets have their history on mainnet, so the risk check reads mainnet even in the Nile demo.
+async function grid(path: string, body?: unknown): Promise<any> {
+  const res = await fetch(`https://api.trongrid.io${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', ...(gridKey ? { 'TRON-PRO-API-KEY': gridKey } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`TronGrid answered ${res.status}`);
+  return res.json();
+}
+
+export async function walletFacts(address: string) {
+  const since = Date.now() - 7 * 86_400_000;
+  const [acct, code, incoming] = await Promise.all([
+    grid(`/v1/accounts/${address}`),
+    grid('/wallet/getcontract', { value: address, visible: true }),
+    grid(`/v1/accounts/${address}/transactions/trc20?only_to=true&limit=200&contract_address=${MAINNET_USDT}&min_timestamp=${since}`),
+  ]);
+  const a = acct.data?.[0];
+  const transfers: { from: string; value: string }[] = incoming.data ?? [];
+  const senders = [...new Set(transfers.map((t) => t.from))];
+  // Up to five senders, one at a time: public TronGrid rate-limits bursts.
+  const frozenSenders: string[] = [];
+  for (const s of senders.slice(0, 5)) if ((await isTetherFrozen(s)) === true) frozenSenders.push(s);
+  return {
+    used: !!a,
+    createdAt: (a?.create_time as number | undefined) ?? null,
+    isContract: !!code?.bytecode,
+    trx: a ? (a.balance ?? 0) / 1e6 : 0,
+    usdtIn7d: { transfers: transfers.length, senders: senders.length, total: transfers.reduce((s, t) => s + Number(t.value), 0) },
+    frozenSenders,
+  };
+}
+
 /* ---------------- AnsimVault ---------------- */
 
 // The vault holds the operator's USDT and releases one approved batch at a time to the payer's

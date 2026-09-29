@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { db } from './db';
 
-export type Flow = 'map_columns' | 'review_flags' | 'receipt' | 'audit_qa' | 'dispute';
+export type Flow = 'map_columns' | 'review_flags' | 'receipt' | 'audit_qa' | 'dispute' | 'wallet_check' | 'plan';
 export const MODEL = process.env.KILN_MODEL ?? 'gpt-oss-120b';
 export const kilnConfigured = () => !!(process.env.KILN_BASE_URL && process.env.KILN_API_KEY);
 
@@ -57,6 +57,7 @@ INVALID_ADDRESS: not a valid TRON address. INVALID_AMOUNT: bad amount. DUPLICATE
 NEW_PAYEE: wallet not in the payee book. LOOKALIKE: resembles a known payee's wallet but differs (address poisoning scam).
 UNUSUAL_AMOUNT: over 3x the payee's usual amount. REPORTED_WALLET: on the reported scam list. TETHER_FROZEN: frozen by Tether.
 MANY_SENDERS_ONE_WALLET: three or more different senders pay one new wallet, a common money-mule pattern in voice-phishing cases.
+RISKY_WALLET: the contact's wallet history on mainnet shows risk signals such as money-mule inflows or links to frozen wallets.
 NEW_CONTACT_WAIT: the contact was added only hours ago and is still in its waiting period (delayed transfer). TRAVEL_RULE_INFO: the amount is at or above the Travel Rule threshold and the sender's details are missing.
 For each row, write one short plain sentence in Korean ("ko") and one in English ("en") explaining the risk, using the note and payee history when they explain it.
 Suggest "action": "fix" when it is a data error the operator can correct, "hold" when it must not be paid until someone checks, or "pay" only when the context clearly explains the flag.
@@ -70,6 +71,14 @@ Return {"ko": "3 to 5 sentences in Korean", "en": "the same in English"}.`,
   audit_qa: `You answer an auditor's question about a USDT payout batch using only the records provided: the signed policy, the rows and the hash-chained event log.
 Cite event ids like [#12] for every fact. If the records do not answer the question, say so.
 Return {"answer": string}.`,
+
+  wallet_check: `You help a licensed Korean remittance operator judge a recipient wallet before it is saved as a contact.
+You get public facts about the wallet on TRON mainnet and the risk flags that code derived from them:
+WALLET_IS_CONTRACT: the address is a smart contract, not a personal wallet. WALLET_FROZEN_SENDERS: it received USDT from wallets Tether has frozen.
+WALLET_MANY_SENDERS: five or more different wallets sent it USDT in the last 7 days, a common money-mule pattern. WALLET_NEW: created less than 30 days ago.
+Write one or two short plain sentences in Korean ("ko") and in English ("en") saying what the facts mean for paying this wallet.
+Never say a wallet is safe or trustworthy. With no flags, say that no risk signals were found in the public record and that the operator should still confirm the address with the recipient. A wallet never used on mainnet is normal for a new family wallet; say so.
+Return {"ko": string, "en": string}.`,
 
   dispute: `You help a licensed Korean remittance operator answer a customer who asks about a payment, for example "my family did not get the money".
 Use only the records given: the matching payments, their hash-chained log events, and what the TRON chain shows for each transaction hash.

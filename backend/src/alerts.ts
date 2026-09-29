@@ -11,7 +11,7 @@ const MESSAGES: Record<string, (d: Data) => string> = {
   POLICY_STOPPED: (d) => `Stop pressed. Policy #${d.policyId} can no longer pay anyone.`,
   BATCH_PAUSED: (d) => `Batch paused${d.line ? ` at line ${d.line}` : ''}: ${d.reason}`,
   BATCH_CLOSED: (d) => `Batch finished: ${d.paid} paid (${usdt(d.amountPaid)} USDT, fees ${usdt(d.fees)}), ${d.refused} refused, ${d.failed} failed, ${d.held} held.`,
-  CONTACT_ADDED: (d) => `New contact added: ${d.name}, wallet ${short(d.address)}. It cannot be paid until the waiting period ends.`,
+  CONTACT_ADDED: (d) => `New contact added: ${d.name}, wallet ${short(d.address)}${d.riskLevel === 'high' ? `, with risk signals: ${(d.riskFlags ?? []).join(', ')}` : ''}. It cannot be paid until the waiting period ends.`,
   VAULT_RELEASED: (d) => `Vault released ${usdt(d.amount)} USDT for ${d.count} approved payments.`,
   VAULT_REFUSED: (d) => `Vault refused to release money: ${d.reason}`,
   VAULT_FROZEN: () => 'The vault was frozen. No batch can take money from it.',

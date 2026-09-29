@@ -4,9 +4,9 @@ import { db, getBatch, getPolicy, getRow, batchRows, updateRow, activePolicy, no
 import { logEvent, allEvents, batchEvents } from './log';
 import { policyDomain, policyTypesFor, policyValue, policyHash, payeesHash, approvalTypes, approvalValue } from './policy';
 import { parseSheet, headerSignature, ruleMapping, validMapping, toRows, type Mapping } from './importer';
-import { screen, contactProblem, BLOCKING, type Payee, type ScreenRow } from './screen';
+import { screen, contactProblem, walletRisk, BLOCKING, type Payee, type ScreenRow } from './screen';
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
-import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, usdtBalance, vaultInfo, vaultState, vaultReleased, vaultRelease, vaultSetFrozen, NILE_USDT } from './tron';
+import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, usdtBalance, walletFacts, vaultInfo, vaultState, vaultReleased, vaultRelease, vaultSetFrozen, NILE_USDT } from './tron';
 import { gasfree, gasfreeConfig, signPermit } from './gasfree';
 import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning } from './orchestrator';
 import { telegramConfigured } from './alerts';
@@ -37,7 +37,8 @@ export function screenRules() {
 // Seeded once from data/payees.json, then edited in the console. user_version records which seed steps
 // ran, so removing every contact does not bring the demo contacts back. Seeded contacts get
 // created_at 0: they were paid before, so they skip the waiting period for new contacts.
-type Contact = { address: string; name: string; country: string | null; usual: number; created_at: number };
+type Risk = { checkedAt: number; level?: string; flags?: string[]; facts?: Awaited<ReturnType<typeof walletFacts>>; note?: { ko: string; en: string } | null; error?: string };
+type Contact = { address: string; name: string; country: string | null; usual: number; created_at: number; risk: Risk | null };
 export function payeeBook(): Contact[] {
   const version = db.pragma('user_version', { simple: true }) as number;
   if (version < 2) {
@@ -50,7 +51,31 @@ export function payeeBook(): Contact[] {
     }
     db.pragma('user_version = 2');
   }
-  return db.prepare('SELECT address, name, country, usual, created_at FROM payees ORDER BY created_at, rowid').all() as Contact[];
+  return (db.prepare('SELECT address, name, country, usual, created_at, risk FROM payees ORDER BY created_at, rowid').all() as (Omit<Contact, 'risk'> & { risk: string | null })[])
+    .map((p) => ({ ...p, risk: p.risk ? (JSON.parse(p.risk) as Risk) : null }));
+}
+
+// Reads the wallet's public history, derives risk flags in code, and asks the model to explain them.
+async function walletCheck(address: string): Promise<Risk> {
+  try {
+    const facts = await walletFacts(address);
+    const risk = walletRisk(facts);
+    const note = kilnConfigured()
+      ? await ask<{ ko: string; en: string }>('wallet_check', PROMPTS.wallet_check, { facts, ...risk }, { maxTokens: 400 }).catch(() => null)
+      : null;
+    return { checkedAt: nowSec(), facts, ...risk, note };
+  } catch (e) {
+    return { checkedAt: nowSec(), error: msg(e) };
+  }
+}
+
+export async function checkContact(address: string) {
+  const c = payeeBook().find((p) => p.address === address);
+  if (!c) throw new Error('That wallet is not in the contacts.');
+  const risk = await walletCheck(address);
+  db.prepare('UPDATE payees SET risk = ? WHERE address = ?').run(JSON.stringify(risk), address);
+  logEvent('CONTACT_CHECKED', { address, level: risk.level ?? null, flags: risk.flags ?? [], error: risk.error ?? null });
+  return payeeBook();
 }
 
 export async function addContact(input: { name?: string; country?: string; address?: string; usual?: number | string }) {
@@ -63,8 +88,9 @@ export async function addContact(input: { name?: string; country?: string; addre
   if (problem) throw new Error(problem);
   if ((await isTetherFrozen(address)) === true) throw new Error('Tether has frozen this wallet on mainnet.');
   const country = String(input.country ?? '').trim().slice(0, 40) || null;
-  db.prepare('INSERT INTO payees (address, name, country, usual, created_at) VALUES (?, ?, ?, ?, ?)').run(address, name, country, usual, nowSec());
-  logEvent('CONTACT_ADDED', { address, name, country, usual });
+  const risk = await walletCheck(address);
+  db.prepare('INSERT INTO payees (address, name, country, usual, created_at, risk) VALUES (?, ?, ?, ?, ?, ?)').run(address, name, country, usual, nowSec(), JSON.stringify(risk));
+  logEvent('CONTACT_ADDED', { address, name, country, usual, riskLevel: risk.level ?? null, riskFlags: risk.flags ?? [] });
   return payeeBook();
 }
 
@@ -77,7 +103,7 @@ export function removeContact(address: string) {
   return payeeBook();
 }
 
-const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6), added: p.created_at }]));
+const bookMap = () => new Map<string, Payee>(payeeBook().map((p) => [p.address, { ...p, usual: Math.round(p.usual * 1e6), added: p.created_at, risk: p.risk?.level }]));
 // Stand-in for wallets reported to police and exchanges.
 const reported = () => new Set(readJson<string[]>('reported.json', []));
 

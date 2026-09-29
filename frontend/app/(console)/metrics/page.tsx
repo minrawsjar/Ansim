@@ -17,7 +17,9 @@ const FLOW_INFO: Record<string, string> = {
   review_flags: 'Explains all flagged rows of a batch in one call. Clean rows are never sent.',
   receipt: 'Writes the owner’s receipt once per finished batch.',
   audit_qa: 'Answers an auditor’s question from the records.',
-  dispute: 'Drafts the answer to a customer’s “did it arrive?” question from the log and the chain.',
+  wallet_check: 'Explains the risk flags that code found in a new contact’s wallet history.',
+  plan: 'Turns the owner’s instruction into a draft batch from the contacts.',
+    dispute: 'Drafts the answer to a customer’s “did it arrive?” question from the log and the chain.',
 };
 
 export default function MetricsPage() {

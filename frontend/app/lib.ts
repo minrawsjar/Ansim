@@ -1,7 +1,11 @@
 // Shared types and helpers for the console. Amounts from the backend are USDT base units (6 decimals).
 
 // created_at is 0 for contacts from the original payee file; month is base units paid in the last 30 days.
-export type Payee = { name: string; country: string | null; address: string; usual: number; created_at: number; month: number };
+export type WalletRisk = {
+  checkedAt: number; level?: 'none' | 'review' | 'high'; flags?: string[]; error?: string; note?: { ko: string; en: string } | null;
+  facts?: { used: boolean; createdAt: number | null; isContract: boolean; trx: number; usdtIn7d: { transfers: number; senders: number; total: number }; frozenSenders: string[] };
+};
+export type Payee = { name: string; country: string | null; address: string; usual: number; created_at: number; month: number; risk: WalletRisk | null };
 export type Rules = { contactWaitHours: number; travelRuleMin: number; travelRuleKrw: number; krwPerUsdt: number };
 export type Status = {
   gasfree: boolean; kiln: boolean; payer: string | null; ownerFallback: boolean; notary: boolean; telegram: boolean;
@@ -133,7 +137,15 @@ export const FLAGS: Record<string, { label: string; tip: string; blocking?: bool
   TETHER_FROZEN: { label: 'Frozen by Tether', tip: 'Tether has frozen this wallet on mainnet', blocking: true },
   MANY_SENDERS_ONE_WALLET: { label: 'Many senders, one wallet', tip: 'Three or more different senders pay one new wallet (possible money mule)' },
   NEW_CONTACT_WAIT: { label: 'New contact waiting', tip: 'Contact was added recently. New contacts wait before they can be paid, like a bank’s delayed transfer (지연이체). Run the checks again once the wait is over.', blocking: true },
+  RISKY_WALLET: { label: 'Risky wallet', tip: 'The contact’s wallet history on mainnet shows risk signals. See the contact card.' },
   TRAVEL_RULE_INFO: { label: 'Travel Rule details needed', tip: 'At or above the Travel Rule threshold. Add the sender’s details before this row can be paid.', blocking: true },
+};
+
+export const WALLET_FLAGS: Record<string, string> = {
+  WALLET_IS_CONTRACT: 'A smart contract, not a personal wallet',
+  WALLET_FROZEN_SENDERS: 'Received USDT from wallets Tether froze',
+  WALLET_MANY_SENDERS: '5+ different senders in 7 days (money-mule pattern)',
+  WALLET_NEW: 'Created less than 30 days ago',
 };
 
 export const REASONS: Record<string, string> = {

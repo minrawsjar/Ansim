@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, usdt, when, waitText, signWithTronLink, sendWithTronLink, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
+import { api, usdt, when, waitText, WALLET_FLAGS, signWithTronLink, sendWithTronLink, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Payee, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink, WaitingForTronLink } from '../ui';
 import { FlowMap, type FlowPayment } from '../flow-map';
 
@@ -88,6 +88,23 @@ function PolicyDesk({ status, policy, committed, reload }: DeskProps) {
 
 const EMPTY_CONTACT = { name: '', country: '', address: '', usual: '' };
 
+// What the wallet's public history on mainnet says. Code sets the flags; the model only explains them.
+function RiskLine({ p, onCheck, busy }: { p: Payee; onCheck: () => void; busy: boolean }) {
+  const r = p.risk;
+  const button = (label: string) => (
+    <button type="button" disabled={busy} onClick={onCheck} className="text-[11px] text-celadon hover:underline disabled:opacity-50">{busy ? 'Checking the chain…' : label}</button>
+  );
+  if (!r) return <span className="block">{button('Check wallet history')}</span>;
+  if (r.error) return <span className="block text-[11px] text-warn">Wallet check failed: {r.error} {button('Try again')}</span>;
+  const tone = r.level === 'high' ? 'text-stop' : r.level === 'review' ? 'text-warn' : 'text-muted';
+  return (
+    <span className={`mt-1 block text-[11px] leading-relaxed ${tone}`}>
+      {r.flags?.length ? r.flags.map((f) => WALLET_FLAGS[f] ?? f).join(' · ') : `No risk signals in the public record${r.facts && !r.facts.used ? ' · never used on mainnet' : ''}`}
+      {r.note && <span className="block text-muted">{r.note.ko} {r.note.en}</span>}
+    </span>
+  );
+}
+
 function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
   payees: Status['payees']; rules: Rules; signed: string[]; selected: string[];
   setSelected: React.Dispatch<React.SetStateAction<string[]>>; reload: () => void;
@@ -127,6 +144,18 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
       setBusy(null);
     }
   };
+  const check = async (address: string) => {
+    setBusy(`check:${address}`);
+    setError(null);
+    try {
+      await api(`/api/payees/${address}/check`, { json: {} });
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
   const orphans = signed.filter((a) => !payees.some((p) => p.address === a));
 
   return (
@@ -158,7 +187,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
               <Button kind="primary" type="submit" busy={busy === 'add'}>Save contact</Button>
               <Button kind="quiet" type="button" onClick={() => { setAdding(false); setError(null); }}>Cancel</Button>
             </div>
-            <p className="text-[11px] leading-relaxed text-muted">Before saving, Ansim refuses a wallet that is invalid, looks like an existing contact’s wallet, is on the reported scam list or is frozen by Tether. The usual amount is used to flag an unusually large payment.</p>
+            <p className="text-[11px] leading-relaxed text-muted">Before saving, Ansim refuses a wallet that is invalid, looks like an existing contact’s wallet, is on the reported scam list or is frozen by Tether. It also reads the wallet’s history on TRON mainnet: a smart contract, money from frozen wallets or five or more senders in a week marks it risky, and its payments are held for review. The usual amount is used to flag an unusually large payment.</p>
           </form>
         )}
         {payees.length === 0 ? (
@@ -171,7 +200,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
               const tag = on && was ? ['SIGNED', 'text-celadon'] : on && signed.length ? ['TO ADD', 'text-warn'] : was ? ['TO REMOVE', 'text-warn'] : null;
               const payableFrom = p.created_at ? p.created_at + rules.contactWaitHours * 3600 : 0;
               return (
-                <li key={p.address} className={`flex items-center gap-3 rounded-[7px] border px-3 py-2.5 transition ${on ? 'border-[#3f5a3d] bg-celadon-soft' : 'border-line'}`}>
+                <li key={p.address} className={`flex items-center gap-3 rounded-[7px] border px-3 py-2.5 transition ${p.risk?.level === 'high' ? 'border-stop/40' : on ? 'border-[#3f5a3d] bg-celadon-soft' : 'border-line'}`}>
                   <input
                     type="checkbox"
                     checked={on}
@@ -186,6 +215,7 @@ function Contacts({ payees, rules, signed, selected, setSelected, reload }: {
                       <span className="num font-mono text-[10px] text-muted">usual {p.usual.toFixed(2)} · 30 days {usdt(p.month)}</span>
                     </span>
                     {payableFrom > now && <span className="block text-[11px] text-warn">New contact: can be paid from {when(payableFrom)}</span>}
+                    <RiskLine p={p} busy={busy === `check:${p.address}`} onCheck={() => check(p.address)} />
                   </span>
                   {tag && <span className={`font-mono text-[9px] tracking-[0.08em] whitespace-nowrap ${tag[1]}`}>{tag[0]}</span>}
                   <button

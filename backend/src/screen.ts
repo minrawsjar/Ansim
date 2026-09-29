@@ -1,6 +1,6 @@
 import { TronWeb } from 'tronweb';
 
-export type Payee = { address: string; name: string; usual: number; added?: number }; // usual in base units, added in unix seconds
+export type Payee = { address: string; name: string; usual: number; added?: number; risk?: string }; // usual in base units, added in unix seconds, risk level
 export type ScreenRow = { line: number; sender: string; receiver: string; amount: number | null; note: string; flags: string[]; travel?: boolean };
 // waitSec: how long a new contact waits before it can be paid. travelMin: the Travel Rule threshold in base units.
 export type ScreenRules = { now?: number; waitSec?: number; travelMin?: number };
@@ -21,7 +21,26 @@ export const FLAG_INFO: Record<string, string> = {
   MANY_SENDERS_ONE_WALLET: 'Three or more different senders pay this one new wallet (possible money mule)',
   NEW_CONTACT_WAIT: 'Contact was added too recently; new contacts wait before they can be paid (delayed transfer, 지연이체)',
   TRAVEL_RULE_INFO: 'At or above the Travel Rule threshold; sender and recipient details are required first',
+  RISKY_WALLET: 'The contact’s wallet history on mainnet shows risk signals',
 };
+
+export type WalletFacts = {
+  used: boolean; createdAt: number | null; isContract: boolean; trx: number;
+  usdtIn7d: { transfers: number; senders: number; total: number }; frozenSenders: string[];
+};
+const HIGH = new Set(['WALLET_IS_CONTRACT', 'WALLET_FROZEN_SENDERS', 'WALLET_MANY_SENDERS']);
+
+// Risk signals from a wallet's public history. Code decides; the model only explains. A wallet with no
+// signals is not called safe: the record is just clean.
+export function walletRisk(f: WalletFacts, nowMs = Date.now()) {
+  const flags: string[] = [];
+  if (f.isContract) flags.push('WALLET_IS_CONTRACT');
+  if (f.frozenSenders.length) flags.push('WALLET_FROZEN_SENDERS');
+  if (f.usdtIn7d.senders >= 5) flags.push('WALLET_MANY_SENDERS');
+  if (f.createdAt && nowMs - f.createdAt < 30 * 86_400_000) flags.push('WALLET_NEW');
+  const level = flags.some((x) => HIGH.has(x)) ? 'high' : flags.length ? 'review' : 'none';
+  return { flags, level };
+}
 
 const B58 = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 export const validAddress = (a: string) => B58.test(a) && TronWeb.isAddress(a);
@@ -70,6 +89,7 @@ export async function screen(
       if (known.some((a) => looksAlike(a, r.receiver))) flag('LOOKALIKE');
     } else {
       if (rules.waitSec && payee.added && now - payee.added < rules.waitSec) flag('NEW_CONTACT_WAIT');
+      if (payee.risk === 'high') flag('RISKY_WALLET');
       if (r.amount !== null && payee.usual > 0 && r.amount > 3 * payee.usual) flag('UNUSUAL_AMOUNT');
     }
     if (rules.travelMin && r.amount !== null && r.amount >= rules.travelMin && !r.travel) flag('TRAVEL_RULE_INFO');

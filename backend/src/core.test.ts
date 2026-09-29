@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { refuseReason, payeesHash, rowsHash, approvalValue } from './policy';
-import { screen, looksAlike, validAddress, contactProblem } from './screen';
+import { screen, looksAlike, validAddress, contactProblem, walletRisk } from './screen';
 import { parseAmount, ruleMapping } from './importer';
 
 const A = 'TLyqzVGLV1srkB7dToTAEqgDSfPtXRJZYH';
@@ -104,4 +104,15 @@ test('new contacts wait, and large transfers need Travel Rule details', async ()
   ];
   await screen(rows, book, new Set(), async () => false, { now, waitSec: 3 * 3600, travelMin: 714_285_715 });
   assert.deepEqual(rows.map((r) => r.flags), [['NEW_CONTACT_WAIT'], ['TRAVEL_RULE_INFO'], []]);
+});
+
+test('wallet history flags contracts, mule inflows, frozen senders and new wallets, and never calls a wallet safe', () => {
+  const now = 1_900_000_000_000;
+  const clean = { used: true, createdAt: now - 400 * 86_400_000, isContract: false, trx: 5, usdtIn7d: { transfers: 1, senders: 1, total: 1 }, frozenSenders: [] };
+  assert.deepEqual(walletRisk(clean, now), { flags: [], level: 'none' });
+  assert.deepEqual(walletRisk({ ...clean, used: false, createdAt: null }, now), { flags: [], level: 'none' });
+  assert.deepEqual(walletRisk({ ...clean, createdAt: now - 86_400_000 }, now), { flags: ['WALLET_NEW'], level: 'review' });
+  assert.equal(walletRisk({ ...clean, usdtIn7d: { transfers: 9, senders: 7, total: 9 } }, now).level, 'high');
+  assert.equal(walletRisk({ ...clean, frozenSenders: [A] }, now).level, 'high');
+  assert.equal(walletRisk({ ...clean, isContract: true }, now).level, 'high');
 });

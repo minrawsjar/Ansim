@@ -51,6 +51,8 @@ async function fakeKiln(req, res) {
     out = { receiver: pick(/지갑|wallet|address/i), amount: pick(/금액|amount/i), sender: pick(/송금인|sender/i), name: input.header.find((h) => /수취인|recipient/i.test(h) && !/지갑/.test(h)) ?? null, note: pick(/비고|note/i) };
   } else if (system.includes('check a USDT payout batch')) {
     out = { rows: input.rows.map((r) => ({ line: r.line, ko: `[fake] ${r.flags.join(', ')} 확인이 필요합니다.`, en: `[fake] Check ${r.flags.join(', ')}.`, action: r.flags.includes('UNUSUAL_AMOUNT') && r.flags.length === 1 ? 'pay' : 'hold' })) };
+  } else if (system.includes('judge a recipient wallet')) {
+    out = input.flags.length ? { ko: `[fake] 위험 신호: ${input.flags.join(', ')}`, en: `[fake] Risk signals: ${input.flags.join(', ')}.` } : { ko: '[fake] 공개 기록에서 위험 신호가 없습니다.', en: '[fake] No risk signals in the public record.' };
   } else if (system.includes('answer a customer')) {
     const p = input.payments[0];
     out = p ? { ko: `[fake] ${p.sender}님의 ${p.amountUSDT} USDT 송금은 ${p.state} 상태입니다.`, en: `[fake] ${p.sender}'s ${p.amountUSDT} USDT payment is ${p.state}. See [#${p.events.at(-1)?.id ?? 0}].` } : { ko: '[fake] 기록이 없습니다.', en: '[fake] No matching payment.' };
