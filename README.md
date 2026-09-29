@@ -79,6 +79,35 @@ npm run verify -- path/to/ansim-evidence.json   # independent audit of an export
 npm run reset                               # clear the local database before a clean demo
 ```
 
+## Public deployment
+
+The console runs on Vercel. The backend stays on the demo laptop, because it holds the payer key and the event log, and Vercel reaches it through a tunnel. Two locks protect it:
+
+- **Backend key.** `BACKEND_KEY` is set in both `backend/.env.local` and `frontend/.env.local`. The backend refuses any request without it, and the console's proxy adds it.
+- **Site password.** With `SITE_PASSWORD` set, the browser asks for it before showing anything.
+
+1. Start the backend and open a tunnel to it:
+
+   ```bash
+   npm run dev
+   ```
+
+   ```bash
+   cloudflared tunnel --url http://localhost:4000
+   ```
+
+2. In the Vercel project, set the root directory to `frontend` and add three environment variables, then redeploy:
+
+   | Variable | Value |
+   |---|---|
+   | `BACKEND_URL` | the `https://…trycloudflare.com` address the tunnel printed |
+   | `BACKEND_KEY` | the same value as in `backend/.env.local` |
+   | `SITE_PASSWORD` | a password to give the judges |
+
+3. For the custom domain, add `ansim.qd.je` under the project's Domains settings. Then add the A record Vercel shows, usually `76.76.21.21` with the name `@`, in the DigitalPlat DNS records for `ansim.qd.je`.
+
+A quick tunnel gets a new address each time it starts, so update `BACKEND_URL` and redeploy after a restart.
+
 ## Demo runs
 
 The demo file has 13 rows: 4 clean, 1 unusual amount explained by its note (추석 보너스), and 8 that must not be paid. Those are a duplicate, a lookalike of a known payee's wallet, an invalid address, three senders paying one new wallet, a Tether-frozen wallet and a reported wallet.
