@@ -8,6 +8,7 @@ import { screen, contactProblem, walletRisk, BLOCKING, type Payee, type ScreenRo
 import { ask, kilnConfigured, PROMPTS, MODEL } from './agent';
 import { tw, isTetherFrozen, recordPolicy, recordStop, registryInfo, addressFromKey, usdtTransferProof, usdtBalance, walletFacts, vaultInfo, vaultState, vaultReleased, vaultRelease, vaultSetFrozen, NILE_USDT } from './tron';
 import { gasfree, gasfreeConfig, signPermit } from './gasfree';
+import { utils } from 'tronweb';
 import { payerAddress, payerKey, summarize, msg, payeeMonth, startRun, isRunning, committed as committedFor } from './orchestrator';
 import { telegramConfigured } from './alerts';
 import { botUsername, ownerChatCount } from './telegram';
@@ -471,13 +472,31 @@ export async function freezeVault(frozen: boolean) {
 }
 
 // Records a freeze the owner sent from TronLink, after checking the chain agrees.
+// Records a freeze the owner sent from TronLink. Only the owner's own setFrozen call to this vault counts,
+// and only once it has landed; the contract itself already refuses anyone else.
 export async function noteVaultFreeze(txid: string) {
-  const v = await vaultState();
+  if (!/^[0-9a-f]{64}$/i.test(txid)) throw new Error('Not a transaction id.');
+  let v = await vaultState();
   if (!v) throw new Error('No vault is deployed.');
-  const info: any = await tw.trx.getTransactionInfo(txid); // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (info?.receipt?.result !== 'SUCCESS') throw new Error('That transaction did not succeed on chain.');
-  logEvent(v.frozen ? 'VAULT_FROZEN' : 'VAULT_UNFROZEN', { vault: v.address, txid, by: 'tronlink' });
-  return vaultView();
+  const tx: any = await tw.trx.getTransaction(txid).catch(() => null); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const call = tx?.raw_data?.contract?.[0];
+  const hex = (a: string) => tw.address.toHex(a).toLowerCase();
+  const setFrozen = utils.ethersUtils.id('setFrozen(bool)').slice(2, 10);
+  if (call?.type !== 'TriggerSmartContract' || call.parameter?.value?.contract_address?.toLowerCase() !== hex(v.address) || !String(call.parameter?.value?.data ?? '').startsWith(setFrozen)) {
+    throw new Error('That transaction is not a freeze or unfreeze of this vault.');
+  }
+  if (call.parameter.value.owner_address?.toLowerCase() !== hex(v.owner)) throw new Error('Only the vault’s owner can freeze it.');
+  for (let i = 0; i < 15; i++) {
+    const info: any = await tw.trx.getUnconfirmedTransactionInfo(txid).catch(() => null); // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (info?.receipt?.result === 'SUCCESS') {
+      v = (await vaultState())!;
+      logEvent(v.frozen ? 'VAULT_FROZEN' : 'VAULT_UNFROZEN', { vault: v.address, txid, by: 'tronlink' });
+      return vaultView();
+    }
+    if (info?.receipt) throw new Error('The vault refused the freeze. Only its owner can freeze it.');
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error('The freeze has not landed yet. Check it on TronScan.');
 }
 
 // Moves the USDT sitting idle in the payer's GasFree account back into the vault, as one GasFree

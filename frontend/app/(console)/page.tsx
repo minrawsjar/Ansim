@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api, usdt, when, waitText, WALLET_FLAGS, signWithTronLink, sendWithTronLink, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Payee, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
+import { api, usdt, when, waitText, WALLET_FLAGS, signWithTronLink, sendWithTronLink, tronLinkState, tronscanAddress, FLAGS, REASONS, type BatchItem, type Policy, type Payee, type Rules, type Status, type TypedDraft, type Vault } from '../lib';
 import { Addr, Button, Callout, Card, ErrorLine, StatePill, Stat, TxLink, WaitingForTronLink } from '../ui';
 import { FlowMap, type FlowPayment } from '../flow-map';
 import { citiesOf, countries } from '../places';
@@ -569,9 +569,11 @@ function VaultCard() {
   const [v, setV] = useState<Vault | null | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wallet, setWallet] = useState<string | null>(null);
   const load = useCallback(() => api<Vault | null>('/api/vault').then(setV).catch((e) => setError(e.message)), []);
   useEffect(() => {
     load();
+    tronLinkState().then((t) => setWallet(t.address)).catch(() => {});
   }, [load]);
 
   const run = async (name: string, action: () => Promise<Vault | null>) => {
@@ -599,11 +601,27 @@ function VaultCard() {
       id="vault"
       eyebrow="On-chain vault · AnsimVault"
       title={v.frozen ? 'Vault frozen by the owner' : 'Vault'}
-      action={<Button kind={v.frozen ? 'primary' : 'danger'} busy={busy === 'freeze'} onClick={() => freeze(!v.frozen)}>{v.frozen ? 'Unfreeze vault' : 'Freeze vault'}</Button>}
+      action={
+        // Only the owner can freeze or unfreeze; the contract refuses anyone else. Others see why.
+        <Button
+          kind={v.frozen ? 'primary' : 'danger'}
+          busy={busy === 'freeze'}
+          disabled={!v.ownerIsDemoKey && wallet !== v.owner}
+          title={!v.ownerIsDemoKey && wallet !== v.owner ? `Only the vault's owner (${v.owner}) can do this. Connect that account in TronLink.` : undefined}
+          onClick={() => freeze(!v.frozen)}
+        >
+          {v.frozen ? 'Unfreeze vault' : 'Freeze vault'}
+        </Button>
+      }
     >
       <div className="grid gap-5">
         <ErrorLine error={error} />
         {v.frozen && <Callout tone="warn">No batch can take money from the vault until the owner unfreezes it.</Callout>}
+        {!v.ownerIsDemoKey && wallet !== v.owner && (
+          <p className="text-[11px] text-muted">
+            Only the vault’s owner, <Addr a={v.owner} />, can freeze it: the contract refuses everyone else. {wallet ? 'Your connected TronLink is not the owner.' : 'Connect the owner’s TronLink to use it.'}
+          </p>
+        )}
         <div className="rounded-lg border border-[#26382c] bg-sunken p-5">
           <div className="flex flex-wrap justify-between gap-2 font-mono text-[9px] tracking-[0.1em] text-[#8ca492]">
             <span>HELD BY THE CONTRACT</span>
