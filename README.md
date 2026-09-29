@@ -206,7 +206,7 @@ How the design avoids inference:
 
 - All code in this repository was written during the hackathon, on 29 and 30 September 2026. The frontend started from `create-next-app`.
 - The reported-wallet list is a stand-in for wallets reported to police and exchanges.
-- The vault's owner is the demo owner key, so approvals signed with that key unlock it. To make a TronLink account the owner, deploy with `VAULT_OWNER=<address> npm run deploy:vault`, or have the current owner call `setOwner`. The vault test above ran from a scratch database, so its batches are not in the live console.
+- The live vault's owner is the team's TronLink account (TULPNb…io83), handed over with `setOwner` on 30 September ([transaction](https://nile.tronscan.org/#/transaction/6866a9726a9e0b9033f897bfe68d6b0fa2bf7c4c2d43de253e3789839fe28bdd)). Payment limits, batch approvals and freezing are signed in TronLink; approvals signed with the demo owner key no longer unlock it. `VAULT_OWNER=<address> npm run deploy:vault` deploys a vault with any owner. The vault test above ran from a scratch database, so its batches are not in the live console.
 - The wallet history check reads TRON mainnet even in the Nile demo, because that is where real families' wallets have a history. The demo wallets have none, so they show as never used.
 - `fake-services.mjs` exists only to test the payment and AI logic without keys. Its transaction hashes are made up, and `verify.mjs` correctly fails them against the chain. Its AI replies are marked [fake].
 - The receipt translations were written without a native speaker's check. The KRW rate for the Travel Rule threshold is a setting (`KRW_PER_USDT`), not a live quote.
