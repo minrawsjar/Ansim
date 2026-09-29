@@ -744,12 +744,18 @@ export default function Console() {
       setBatches(b);
       setError(null);
     } catch (e) {
-      setError(`Cannot reach the backend: ${(e as Error).message}. Start it with npm run dev.`);
+      setError(`The backend is not answering (${(e as Error).message}). It is usually restarting after an update and is back within a minute or two; this page keeps trying. Running locally? Start it with npm run dev.`);
     }
   }, []);
   useEffect(() => {
     load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
+  // While the backend is unreachable, try again every 5 seconds, so the page recovers without a reload.
+  useEffect(() => {
+    if (!error) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [error, load]);
 
   // A new policy's registry record confirms a few seconds after signing. Look again until it shows, for up to a minute.
   const recording = policy.policy?.status === 'ACTIVE' && !policy.policy.anchor_tx ? policy.policy.id : null;
